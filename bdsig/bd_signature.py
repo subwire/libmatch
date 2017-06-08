@@ -3,12 +3,12 @@ import copy
 import pickle
 import os
 import logging
-
+import arpy
 logger = logging.getLogger("BDSignature")
 
 class BDSignature:
 
-    def i__init__(self, project, cfg=None, project_kwargs=None):
+    def __init__(self, project, cfg=None, fname=None, project_kwargs=None):
         """
         Create a "signature" out of this project.
         :param project:
@@ -22,11 +22,13 @@ class BDSignature:
         self.functions = self.cfg.kb.functions
         self.project = project
         self.project_kwargs = project_kwargs
-        if project.loader.main_bin.provides:
-            self.name = project.loader.main_bin.provides
+        if not fname:
+            if project.loader.main_bin.provides:
+                self.name = project.loader.main_bin.provides
+            else:
+                self.name = os.path.basename(project.filename)
         else:
-            self.name = os.path.basename(project.filename)
-
+            self.name = fname
     @staticmethod
     def load(filename):
         if not filename.endswith(".bdsig"):
@@ -56,16 +58,16 @@ class BDSignature:
         thing.project = angr.Project(origstream)
         try:        
             thing.project.kb.callgraph = thing.callgraph
-            except AttributeError:
-                # Already got it
-                pass    
-            try:        
-                thing.project.kb.functions = thing.functions
-            except:     
-                pass    
-            # Dammit salls....
-            thing.cfg.kb = thing.project.kb
-            return thing
+        except AttributeError:
+            # Already got it
+            pass    
+        try:        
+            thing.project.kb.functions = thing.functions
+        except:     
+            pass    
+        # Dammit salls....
+        thing.cfg.kb = thing.project.kb
+        return thing
                                                                                                                 
     def dump(self):
         outfn = self.project.filename + ".bdsig"
@@ -75,8 +77,10 @@ class BDSignature:
             pickle.dump(thing, f)
 
     def dumps(self):
-        thing = copy.deepcopy(self)
+        thing = copy.copy(self)
+        del thing.project
         thing.project = None
+        thing.cfg.kb = None
         return pickle.dumps(thing)
 
 
@@ -128,11 +132,13 @@ class BDArchiveSignature:
             try:
                 logger.debug("Processing %s:%s" % (filename, fname))
                 proj = angr.Project(arfile)
-                cfg = proj.analyses.CFGFast()
-                self.files[fname] = BDSignature(proj, cfg)
+                self.files[fname] = BDSignature(proj,fname=fname)
+            except Exception as e:
+                logger.exception("Failed to create signature for %s:%s" % (filename, fname))
+
     
     def dump(self, fname):
-        thing = copy.deepcopy(self)
+        thing = copy.copy(self)
         thing.files = {fn:sig.dumps() for fn, sig in thing.files.items()}
         with open(fname, 'wb') as f:
             pickle.dump(thing, f)
@@ -152,6 +158,8 @@ class BDArchiveSignature:
     @staticmethod
     def make_signature(fname):
         outfn = fname + ".bdasig"
+        sig = BDArchiveSignature(fname)
+        sig.dump(outfn)
 
 def make_all_signatures(rootDir):
     for dirName, subdirList, fileList in os.walk(rootDir):
@@ -164,7 +172,11 @@ def make_all_signatures(rootDir):
                     BDSignature.make_signature(fullfname)
                 except Exception as e:
                     logger.exception("Could not make signature for " + fullfname)
-
+            elif fname.endswith('.a'):
+                fullfname = os.path.join(dirName, fname)
+                logger.debug("Making signature for archive " + fullfname)
+                BDArchiveSignature.make_signature(fullfname)
+                
 
 def match_all_signatures(project, cfg, rootDir):
     candidates = []
