@@ -29,6 +29,7 @@ class BDSignature:
                 self.name = os.path.basename(project.filename)
         else:
             self.name = fname
+
     @staticmethod
     def load(filename):
         if not filename.endswith(".bdsig"):
@@ -56,19 +57,19 @@ class BDSignature:
     def loads(stream, origstream):
         thing = pickle.loads(stream)
         thing.project = angr.Project(origstream)
-        try:        
+        try:
             thing.project.kb.callgraph = thing.callgraph
         except AttributeError:
             # Already got it
-            pass    
-        try:        
+            pass
+        try:
             thing.project.kb.functions = thing.functions
-        except:     
-            pass    
+        except:
+            pass
         # Dammit salls....
         thing.cfg.kb = thing.project.kb
         return thing
-                                                                                                                
+
     def dump(self):
         outfn = self.project.filename + ".bdsig"
         thing = copy.deepcopy(self)
@@ -82,7 +83,6 @@ class BDSignature:
         thing.project = None
         thing.cfg.kb = None
         return pickle.dumps(thing)
-
 
     def match(self, thing, cfg, match_all_funcs=False):
         """
@@ -117,6 +117,7 @@ class BDSignature:
         sig = BDSignature(proj,project_kwargs=project_kwargs)
         sig.dump()
 
+
 class BDArchiveSignature:
 
     def __init__(self, filename):
@@ -136,13 +137,13 @@ class BDArchiveSignature:
             except Exception as e:
                 logger.exception("Failed to create signature for %s:%s" % (filename, fname))
 
-    
+
     def dump(self, fname):
         thing = copy.copy(self)
         thing.files = {fn:sig.dumps() for fn, sig in thing.files.items()}
         with open(fname, 'wb') as f:
             pickle.dump(thing, f)
-    
+
     @staticmethod
     def load(fname):
         if not fname.endswith(".bdasig"):
@@ -176,7 +177,7 @@ def make_all_signatures(rootDir):
                 fullfname = os.path.join(dirName, fname)
                 logger.debug("Making signature for archive " + fullfname)
                 BDArchiveSignature.make_signature(fullfname)
-                
+
 
 def match_all_signatures(project, cfg, rootDir):
     candidates = []

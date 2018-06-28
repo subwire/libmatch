@@ -1,18 +1,21 @@
-from bd_signature import *
+from bdd import *
 import logging
 import sys
 import angr
 
 logging.basicConfig()
 l = logging.getLogger()
-l.setLevel(logging.ERROR)
+l.setLevel(logging.WARNING)
 
-p = angr.Project(sys.argv[1])
-cfg = p.analyses.CFGFast()
+l.warn("Making project . . .")
+p = angr.Project(sys.argv[1], load_options={"auto_load_libs": False})
+l.warn("Making signature . . .")
+bdd = BinDiffDescriptor(p)
 
-results = match_all_signatures(p, cfg, "./objects/")
-results = sorted(results,key=lambda x: x[2])
-for matched, unmatched, rate, sig in reversed(results):
-	print "Matched %d (%f%%) functions in %s:" % (len(matched), rate, sig.name)
-	for addr_a, addr_b, sym in matched:
-		print "\tFound %s at %s" % (sym.name, hex(addr_b))
+l.warn("Matching . . .")
+results = match_all_signatures(bdd, "./objects/")
+results = sorted(results, key=lambda x: x[0])
+for rate, matched, fname in reversed(results):
+	print "Matched %d (%f%%) functions in %s:" % (len(matched), rate * 100, fname)
+	for m in matched:
+		print "\t%s" % m

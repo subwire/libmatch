@@ -1,4 +1,4 @@
-from bd_signature import *
+from bdd import *
 import logging
 import sys
 
