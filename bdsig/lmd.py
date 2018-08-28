@@ -4,10 +4,10 @@ import pickle
 import os
 import angr
 from angr.errors import SimEngineError, SimMemoryError
-from fastbindiff import BinDiff
+from .iocg import InterObjectCallgraph
 
 
-l = logging.getLogger("bdd")
+l = logging.getLogger("bdsig.lmd")
 l.setLevel("DEBUG")
 
 
@@ -60,6 +60,7 @@ class NormalizedFunction(object):
         self.startpoint = function.startpoint
         self.merged_blocks = dict()
         self.orig_function = function
+        self.addr = self.orig_function.addr
 
         # find nodes which end in call and combine them
         done = False
@@ -105,6 +106,12 @@ class NormalizedFunction(object):
             if len(call_targets) > 0:
                 self.call_sites[n] = call_targets
 
+    def __getattr__(self, a):
+        if "orig_function" in self.__dict__:
+            return getattr(self.orig_function, a)
+        else:
+            raise AttributeError(a)
+
 
 class CleLoaderHusk(object):
     """
@@ -126,6 +133,8 @@ class CleBackendHusk(object):
         self.sections_map = backend.sections_map
         self.arch = backend.arch
         self.provides = backend.provides
+        self.all_symbols = backend.all_symbols
+        self.mapped_base = backend.mapped_base
 
         self.symbols_by_addr = backend.symbols_by_addr
         for sym in self.symbols_by_addr.itervalues():
@@ -154,13 +163,14 @@ class CleBackendHusk(object):
         return self.sections.find_region_containing(addr)
 
 
-class BinDiffDescriptor(object):
+class LibMatchDescriptor(object):
     """
-    A class to precompute all information for a project necessary for BinDiff to run.
+    A class to precompute all information for a project necessary for LibMatch to run.
     Serializes easily into a (relatively) small blob.
     """
-    def __init__(self, proj):
+    def __init__(self, proj, banned_names=("$d", "$t")):
         self.cfg = proj.analyses.CFGFast()
+        self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
                                 for addr, sp in proj._sim_procedures.iteritems()}
         self.normalized_functions = {}
@@ -180,7 +190,7 @@ class BinDiffDescriptor(object):
         for norm_f in self.normalized_functions.itervalues():
             for b in norm_f.graph.nodes():
                 ord_succ = self._get_ordered_successors(proj, b, norm_f.graph.successors(b))
-                self.ordered_successors[(norm_f.orig_function.addr, b.addr)] = ord_succ
+                self.ordered_successors[(norm_f.addr, b.addr)] = ord_succ
 
         self.function_attributes = self._compute_function_attributes()
 
@@ -199,6 +209,19 @@ class BinDiffDescriptor(object):
         # Do this last because it is somewhat dangerous (must modify symbol owner object references)
         self.loader = CleLoaderHusk(proj.loader)
 
+        self.banned_addrs = set()
+        for faddr in self.function_manager:
+            f = self.function_manager.function(faddr)
+            if f.is_plt or f.is_simprocedure or not f.name or f.name in banned_names:
+                self.banned_addrs.add(faddr)
+
+        self.viable_functions = set(self.function_attributes) - set(self.banned_addrs)
+
+        self.viable_symbols = set()
+        for sym in self.loader.main_object.all_symbols:
+            if sym.is_function and sym.binding != "STB_LOCAL" and sym.rebased_addr not in self.banned_addrs:
+                self.viable_symbols.add(sym)
+
     def is_hooked(self, addr):
         return addr in self._sim_procedures
 
@@ -214,13 +237,9 @@ class BinDiffDescriptor(object):
             # skip syscalls and functions which are None in the cfg
             if self.cfg.kb.functions.function(function_addr) is None or self.cfg.kb.functions.function(function_addr).is_syscall:
                 continue
-            if self.cfg.kb.functions.function(function_addr) is not None:
-                normalized_function = self.normalized_functions[function_addr]
-                number_of_basic_blocks = len(normalized_function.graph.nodes())
-                number_of_edges = len(normalized_function.graph.edges())
-            else:
-                number_of_basic_blocks = 0
-                number_of_edges = 0
+            normalized_function = self.normalized_functions[function_addr]
+            number_of_basic_blocks = len(normalized_function.graph.nodes())
+            number_of_edges = len(normalized_function.graph.edges())
             if function_addr in all_funcs:
                 number_of_subfunction_calls = len(list(self.cfg.kb.callgraph.successors(function_addr)))
             else:
@@ -251,30 +270,39 @@ class BinDiffDescriptor(object):
     @staticmethod
     def make_signature(filename, **project_kwargs):
         proj = angr.Project(filename, **project_kwargs)
-        bdd = BinDiffDescriptor(proj)
-        with open(os.path.abspath(filename) + ".bdd", "wb") as f:
-            bdd.dump(f)
+        lmd = LibMatchDescriptor(proj)
+        return lmd
+
+    @staticmethod
+    def make_signature_dump(filename, **project_kwargs):
+        lmd = LibMatchDescriptor.make_signature(filename, **project_kwargs)
+        with open(os.path.abspath(filename) + ".lmd", "wb") as f:
+            lmd.dump(f)
 
     @staticmethod
     def load_path(p):
         with open(p, "rb") as f:
-            return BinDiffDescriptor.load(f)
+            return LibMatchDescriptor.load(f)
 
     @staticmethod
     def load(f):
-        bdd = pickle.load(f)
+        lmd = pickle.load(f)
 
-        if not isinstance(bdd, BinDiffDescriptor):
-            raise ValueError("That's not a BinDiffDescriptor!")
-        return bdd
+        if not isinstance(lmd, LibMatchDescriptor):
+            raise ValueError("That's not a LibMatchDescriptor!")
+        return lmd
 
     @staticmethod
     def loads(data):
-        bdd = pickle.loads(data)
+        lmd = pickle.loads(data)
 
-        if not isinstance(bdd, BinDiffDescriptor):
-            raise ValueError("That's not a BinDiffDescriptor!")
-        return bdd
+        if not isinstance(lmd, LibMatchDescriptor):
+            raise ValueError("That's not a LibMatchDescriptor!")
+        return lmd
+
+    def dump_path(self, p):
+        with open(p, "wb") as f:
+            self.dump(f)
 
     def dump(self, f):
         return pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
@@ -282,58 +310,11 @@ class BinDiffDescriptor(object):
     def dumps(self):
         return pickle.dumps(self, pickle.HIGHEST_PROTOCOL)
 
-    # Matching
+    # Formatting
 
-    @staticmethod
-    def diff(bdd_a, bdd_b):
-        return BinDiff(bdd_a, bdd_b)
+    def __repr__(self):
+        return "<LibMatchDescriptor for %r>" % self.filename
 
-    @staticmethod
-    def diff_from_filesystem(path_a, path_b):
-        with open(path_a, "rb") as f:
-            bdd_a = BinDiffDescriptor.load(f)
-        with open(path_b, "rb") as f:
-            bdd_b = BinDiffDescriptor.load(f)
-
-        return BinDiffDescriptor.diff(bdd_a, bdd_b)
-
-
-def make_all_signatures(rootDir):
-    for dirName, subdirList, fileList in os.walk(rootDir):
-        l.debug('Found directory: %s' % dirName)
-        for fname in fileList:
-            if fname.endswith(".o"):
-                fullfname = os.path.join(dirName, fname)
-                l.debug("Making signature for " + fullfname)
-                try:
-                    BinDiffDescriptor.make_signature(fullfname, load_options={"rebase_granularity": 0x1000})
-                except angr.errors.AngrCFGError:
-                    l.warn("No executable data for %s, skipping" % fullfname)
-                except Exception as e:
-                    l.exception("Could not make signature for " + fullfname)
-            """
-            elif fname.endswith('.a'):
-                fullfname = os.path.join(dirName, fname)
-                l.debug("Making signature for archive " + fullfname)
-                BDArchiveSignature.make_signature(fullfname)
-            """
-
-def match_all_signatures(bdd, rootDir):
-    candidates = []
-    for dirName, subdirList, fileList in os.walk(rootDir):
-        l.debug('Found directory: %s' % dirName)
-        for fname in fileList:
-            if fname.endswith(".bdd"):
-                fullfname = os.path.join(dirName, fname)
-                l.debug("Checking signature for " + fullfname)
-                try:
-                    sig = BinDiffDescriptor.load_path(fullfname)
-                    bd = BinDiffDescriptor.diff(bdd, sig)
-
-                    r, matched = bd.lib_result_stats()
-                    if r > 0.0:
-                        candidates.append((r, matched, fname))
-
-                except Exception as e:
-                    l.exception("Could not make signature for " + fullfname)
-    return candidates
+    def __str__(self):
+        # TODO: add better str format?
+        return repr(self)

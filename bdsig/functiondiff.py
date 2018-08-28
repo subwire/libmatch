@@ -1,20 +1,14 @@
-
+import networkx
 import logging
-import math
 import types
+import math
 from collections import deque
 
-import networkx
 
-from angr.errors import SimEngineError, SimMemoryError
+l = logging.getLogger("bdsig.functiondiff")
+l.setLevel("INFO")
 
-# todo include an explanation of the algorithm
-# todo include a method that detects any change other than constants
-# todo use function names / string references where available
 
-l = logging.getLogger("angr.analyses.bindiff")
-
-# basic block changes
 DIFF_TYPE = "type"
 DIFF_VALUE = "value"
 
@@ -22,7 +16,6 @@ DIFF_VALUE = "value"
 # exception for trying find basic block changes
 class UnmatchedStatementsException(Exception):
     pass
-
 
 # statement difference classes
 class Difference(object):
@@ -37,27 +30,6 @@ class ConstantChange(object):
         self.offset = offset
         self.value_a = value_a
         self.value_b = value_b
-
-
-class LibMatch(object):
-    def __init__(self, prog_addr, lib_addr, lib_func_name, lib_name):
-        self.prog_addr = prog_addr
-        self.lib_addr = lib_addr
-        self.lib_func_name = lib_func_name
-        self.lib_name = lib_name
-
-    def __str__(self):
-        return "Match: %#x is %s (%#x) from %s" % (self.prog_addr,
-                                                   self.lib_func_name,
-                                                   self.lib_addr,
-                                                   self.lib_name)
-
-    def __repr__(self):
-        return "<LibMatch in prog at %#x to %s (%#x) in %s>" % (self.prog_addr,
-                                                                self.lib_func_name,
-                                                                self.lib_addr,
-                                                                self.lib_name)
-
 
 # helper methods
 def _euclidean_dist(vector_a, vector_b):
@@ -267,20 +239,20 @@ class FunctionDiff(object):
     """
     This class computes the a diff between two functions.
     """
-    def __init__(self, bdd_a, bdd_b, function_a, function_b, bindiff=None):
+    def __init__(self, lmd_a, lmd_b, function_a, function_b):
         """
-        :param function_a: The first angr Function object to diff.
-        :param function_b: The second angr Function object.
-        :param bindiff:    An optional Bindiff object. Used for some extra normalization during basic block comparison.
+        :param lmd_a: The first LMD (owns function_a)
+        :param lmd_b: The second LMD (owns function_b)
+        :param function_a: The first NormalizedFunction object
+        :param function_b: The second NormalizedFunction object
         """
-        self._bdd_a = bdd_a
-        self._bdd_b = bdd_b
-        self._function_a = self._bdd_a.normalized_functions[function_a.addr]
-        self._function_b = self._bdd_b.normalized_functions[function_b.addr]
-        self._bindiff = bindiff
+        self.lmd_a = lmd_a
+        self.lmd_b = lmd_b
+        self.function_a = function_a
+        self.function_b = function_b
 
-        self.attributes_a = self._compute_block_attributes(self._function_a)
-        self.attributes_b = self._compute_block_attributes(self._function_b)
+        self.attributes_a = self._compute_block_attributes(self.function_a)
+        self.attributes_b = self._compute_block_attributes(self.function_b)
 
         self._block_matches = set()
         self._unmatched_blocks_from_a = set()
@@ -334,8 +306,8 @@ class FunctionDiff(object):
                     not self.blocks_probably_identical(block_a, block_b, check_constants=True):
                 differing_blocks.append((block_a, block_b))
         for block_a, block_b in differing_blocks:
-            ba = self.bdd_a.normalized_blocks[(self._function_a.orig_function.addr, block_a.addr)]
-            bb = self.bdd_b.normalized_blocks[(self._function_b.orig_function.addr, block_b.addr)]
+            ba = self.lmd_a.normalized_blocks[(self.function_a.addr, block_a.addr)]
+            bb = self.lmd_b.normalized_blocks[(self.function_b.addr, block_b.addr)]
             diffs[(block_a, block_b)] = FunctionDiff._block_diff_constants(ba, bb)
         return diffs
 
@@ -356,14 +328,14 @@ class FunctionDiff(object):
         """
 
         # handle sim procedure blocks
-        if self._bdd_a.is_hooked(block_a) and self._bdd_b.is_hooked(block_b):
-            if self._bdd_a._sim_procedures[block_a] == self._bdd_b._sim_procedures[block_b]:
+        if self.lmd_a.is_hooked(block_a) and self.lmd_b.is_hooked(block_b):
+            if self.lmd_a._sim_procedures[block_a] == self.lmd_b._sim_procedures[block_b]:
                 return 1.0
             else:
                 return 0.0
 
-        block_a = self._bdd_a.normalized_blocks[(self._function_a.orig_function.addr, block_a.addr)]
-        block_b = self._bdd_b.normalized_blocks[(self._function_b.orig_function.addr, block_b.addr)]
+        block_a = self.lmd_a.normalized_blocks[(self.function_a.addr, block_a.addr)]
+        block_b = self.lmd_b.normalized_blocks[(self.function_b.addr, block_b.addr)]
 
         # if both were None then they are assumed to be the same, if only one was the same they are assumed to differ
         if block_a is None and block_b is None:
@@ -374,8 +346,8 @@ class FunctionDiff(object):
         # get all elements for computing similarity
         tags_a = [s.tag for s in block_a.statements]
         tags_b = [s.tag for s in block_b.statements]
-        consts_a = [c.value for c in block_a.all_constants]
-        consts_b = [c.value for c in block_b.all_constants]
+        consts_a = [c.value for c in block_a.all_constants if not self.lmd_a.loader.main_object.contains_addr(c.value)]
+        consts_b = [c.value for c in block_b.all_constants if not self.lmd_b.loader.main_object.contains_addr(c.value)]
         all_registers_a = [s.offset for s in block_a.statements if hasattr(s, "offset")]
         all_registers_b = [s.offset for s in block_b.statements if hasattr(s, "offset")]
         jumpkind_a = block_a.jumpkind
@@ -407,11 +379,11 @@ class FunctionDiff(object):
         :returns:               Whether or not the blocks appear to be identical.
         """
         # handle sim procedure blocks
-        if self._bdd_a.is_hooked(block_a) and self._bdd_b.is_hooked(block_b):
-            return self._bdd_a._sim_procedures[block_a] == self._bdd_b._sim_procedures[block_b]
+        if self.lmd_a.is_hooked(block_a) and self.lmd_b.is_hooked(block_b):
+            return self.lmd_a._sim_procedures[block_a] == self.lmd_b._sim_procedures[block_b]
 
-        block_a = self._bdd_a.normalized_blocks[(self._function_a.orig_function.addr, block_a.addr)]
-        block_b = self._bdd_b.normalized_blocks[(self._function_b.orig_function.addr, block_b.addr)]
+        block_a = self.lmd_a.normalized_blocks[(self.function_a.addr, block_a.addr)]
+        block_b = self.lmd_b.normalized_blocks[(self.function_b.addr, block_b.addr)]
 
         # if both were None then they are assumed to be the same, if only one was None they are assumed to differ
         if block_a is None and block_b is None:
@@ -435,18 +407,14 @@ class FunctionDiff(object):
         # get values of differences that probably indicate no change
         acceptable_differences = self._get_acceptable_constant_differences(block_a, block_b)
 
-        # todo match globals
         for c in diff_constants:
             if (c.value_a, c.value_b) in self._block_matches:
                 # constants point to matched basic blocks
                 continue
-            if self._bindiff is not None and (c.value_a and c.value_b) in self._bindiff.function_matches:
-                # constants point to matched functions
-                continue
             # if both are in the binary we'll assume it's okay, although we should really match globals
             # TODO use global matches
-            if self._bdd_a.loader.main_object.contains_addr(c.value_a) and \
-                    self._bdd_b.loader.main_object.contains_addr(c.value_b):
+            if self.lmd_a.loader.main_object.contains_addr(c.value_a) and \
+                    self.lmd_b.loader.main_object.contains_addr(c.value_b):
                 continue
             # if the difference is equal to the difference in block addr's or successor addr's we'll say it's also okay
             if c.value_b - c.value_a in acceptable_differences:
@@ -537,8 +505,8 @@ class FunctionDiff(object):
         """
         # get the attributes for all blocks
         l.debug("Computing diff of functions: %s, %s",
-                ("%#x" % self._function_a.startpoint.addr) if self._function_a.startpoint is not None else "None",
-                ("%#x" % self._function_b.startpoint.addr) if self._function_b.startpoint is not None else "None"
+                ("%#x" % self.function_a.startpoint.addr) if self.function_a.startpoint is not None else "None",
+                ("%#x" % self.function_b.startpoint.addr) if self.function_b.startpoint is not None else "None"
                 )
 
         # get the initial matches
@@ -564,10 +532,10 @@ class FunctionDiff(object):
             l.debug("FunctionDiff: Processing (%#x, %#x)", block_a.addr, block_b.addr)
 
             # we could find new matches in the successors or predecessors of functions
-            block_a_succ = list(self._function_a.graph.successors(block_a))
-            block_b_succ = list(self._function_b.graph.successors(block_b))
-            block_a_pred = list(self._function_a.graph.predecessors(block_a))
-            block_b_pred = list(self._function_b.graph.predecessors(block_b))
+            block_a_succ = list(self.function_a.graph.successors(block_a))
+            block_b_succ = list(self.function_b.graph.successors(block_b))
+            block_a_pred = list(self.function_a.graph.predecessors(block_a))
+            block_b_pred = list(self.function_b.graph.predecessors(block_b))
 
             # propagate the difference in blocks as delta
             delta = tuple((i-j) for i, j in zip(self.attributes_b[block_b], self.attributes_a[block_a]))
@@ -577,9 +545,9 @@ class FunctionDiff(object):
 
             # if the blocks are identical then the successors should most likely be matched in the same order
             if self.blocks_probably_identical(block_a, block_b) and len(block_a_succ) == len(block_b_succ):
-                ordered_succ_a = self._get_ordered_successors(self._bdd_a, self._function_a.orig_function.addr,
+                ordered_succ_a = self._get_ordered_successors(self.lmd_a, self.function_a.addr,
                                                               block_a, block_a_succ)
-                ordered_succ_b = self._get_ordered_successors(self._bdd_b, self._function_b.orig_function.addr,
+                ordered_succ_b = self._get_ordered_successors(self.lmd_b, self.function_b.addr,
                                                               block_b, block_b_succ)
 
                 new_matches += zip(ordered_succ_a, ordered_succ_b)
@@ -611,8 +579,8 @@ class FunctionDiff(object):
         self._block_matches = set((x, y) for (x, y) in matched_a.items())
 
         # get the unmatched blocks
-        self._unmatched_blocks_from_a = set(x for x in self._function_a.graph.nodes() if x not in matched_a)
-        self._unmatched_blocks_from_b = set(x for x in self._function_b.graph.nodes() if x not in matched_b)
+        self._unmatched_blocks_from_a = set(x for x in self.function_a.graph.nodes() if x not in matched_a)
+        self._unmatched_blocks_from_b = set(x for x in self.function_b.graph.nodes() if x not in matched_b)
 
     @staticmethod
     def _get_ordered_successors(bdd, faddr, block, succ):
@@ -710,354 +678,11 @@ class FunctionDiff(object):
 
         # get the difference between the data segments
         # this is hackish
-        if ".bss" in self._bdd_a.loader.main_object.sections_map and \
-                ".bss" in self._bdd_b.loader.main_object.sections_map:
-            bss_a = self._bdd_a.loader.main_object.sections_map[".bss"].min_addr
-            bss_b = self._bdd_b.loader.main_object.sections_map[".bss"].min_addr
+        if ".bss" in self.lmd_a.loader.main_object.sections_map and \
+                ".bss" in self.lmd_b.loader.main_object.sections_map:
+            bss_a = self.lmd_a.loader.main_object.sections_map[".bss"].min_addr
+            bss_b = self.lmd_b.loader.main_object.sections_map[".bss"].min_addr
             acceptable_differences.add(bss_b - bss_a)
             acceptable_differences.add((bss_b - block_b_base) - (bss_a - block_a_base))
 
         return acceptable_differences
-
-
-class BinDiff(object):
-    """
-    This class computes the a diff between two binaries represented by BinDiffDescriptors
-    """
-    def __init__(self, bdd_a, bdd_b,
-                 globally_banned_a=frozenset(), globally_banned_b=frozenset(),
-                 enable_advanced_backward_slicing=False):
-        """
-        :param bdd_a: The first BinDiffDescriptor to use
-        :param bdd_b: The second BinDiffDescriptor to use
-        """
-        back_traversal = not enable_advanced_backward_slicing
-
-        self.bdd_a = bdd_a
-        self.bdd_b = bdd_b
-
-        self.cfg_a = bdd_a.cfg
-        self.cfg_b = bdd_b.cfg
-
-        self.attributes_a = self.bdd_a.function_attributes
-        self.attributes_b = self.bdd_b.function_attributes
-
-        self.globally_banned_a = globally_banned_a
-        self.globally_banned_b = globally_banned_b
-
-        self._function_diffs = dict()
-        self.function_matches = set()
-        self._unmatched_functions_from_a = set()
-        self._unmatched_functions_from_b = set()
-
-        self._compute_diff()
-
-    def functions_probably_identical(self, func_a_addr, func_b_addr, check_consts=False):
-        """
-        Compare two functions and return True if they appear identical.
-
-        :param func_a_addr: The address of the first function (in the first binary).
-        :param func_b_addr: The address of the second function (in the second binary).
-        :returns:           Whether or not the functions appear to be identical.
-        """
-        if self.bdd_a.is_hooked(func_a_addr) and self.bdd_b.is_hooked(func_b_addr):
-            return self.bdd_a._sim_procedures[func_a_addr] == self.bdd_b._sim_procedures[func_b_addr]
-
-        func_diff = self.get_function_diff(func_a_addr, func_b_addr)
-        if check_consts:
-            return func_diff.probably_identical_with_consts
-
-        return func_diff.probably_identical
-
-    @property
-    def identical_functions(self):
-        """
-        :returns: A list of function matches that appear to be identical
-        """
-        identical_funcs = []
-        for (func_a, func_b) in self.function_matches:
-            if self.functions_probably_identical(func_a, func_b):
-                identical_funcs.append((func_a, func_b))
-        return identical_funcs
-
-    @property
-    def differing_functions(self):
-        """
-        :returns: A list of function matches that appear to differ
-        """
-        different_funcs = []
-        for (func_a, func_b) in self.function_matches:
-            if not self.functions_probably_identical(func_a, func_b):
-                different_funcs.append((func_a, func_b))
-        return different_funcs
-
-    def differing_functions_with_consts(self):
-        """
-        :return: A list of function matches that appear to differ including just by constants
-        """
-        different_funcs = []
-        for (func_a, func_b) in self.function_matches:
-            if not self.functions_probably_identical(func_a, func_b, check_consts=True):
-                different_funcs.append((func_a, func_b))
-        return different_funcs
-
-    @property
-    def differing_blocks(self):
-        """
-        :returns: A list of block matches that appear to differ
-        """
-        differing_blocks = []
-        for (func_a, func_b) in self.function_matches:
-            differing_blocks.extend(self.get_function_diff(func_a, func_b).differing_blocks)
-        return differing_blocks
-
-    @property
-    def identical_blocks(self):
-        """
-        :return A list of all block matches that appear to be identical
-        """
-        identical_blocks = []
-        for (func_a, func_b) in self.function_matches:
-            identical_blocks.extend(self.get_function_diff(func_a, func_b).identical_blocks)
-        return identical_blocks
-
-    @property
-    def blocks_with_differing_constants(self):
-        """
-        :return: A dict of block matches with differing constants to the tuple of constants
-        """
-        diffs = dict()
-        for (func_a, func_b) in self.function_matches:
-            diffs.update(self.get_function_diff(func_a, func_b).blocks_with_differing_constants)
-        return diffs
-
-    @property
-    def unmatched_functions(self):
-        return self._unmatched_functions_from_a, self._unmatched_functions_from_b
-
-    # gets the diff of two functions in the binaries
-    def get_function_diff(self, function_addr_a, function_addr_b):
-        """
-        :param function_addr_a: The address of the first function (in the first binary)
-        :param function_addr_b: The address of the second function (in the second binary)
-        :returns: the FunctionDiff of the two functions
-        """
-        pair = (function_addr_a, function_addr_b)
-        if pair not in self._function_diffs:
-            function_a = self.bdd_a.function_manager.function(function_addr_a)
-            function_b = self.bdd_b.function_manager.function(function_addr_b)
-            self._function_diffs[pair] = FunctionDiff(self.bdd_a, self.bdd_b, function_a, function_b, self)
-        return self._function_diffs[pair]
-
-    def _get_call_site_matches(self, func_a, func_b):
-        possible_matches = set()
-
-        # Make sure those functions are not SimProcedures
-        f_a = self.bdd_a.function_manager.function(func_a)
-        f_b = self.bdd_b.function_manager.function(func_b)
-        if f_a.startpoint is None or f_b.startpoint is None:
-            return possible_matches
-
-        fd = self.get_function_diff(func_a, func_b)
-        basic_block_matches = fd.block_matches
-        function_a = fd._function_a
-        function_b = fd._function_b
-        for (a, b) in basic_block_matches:
-            if a in function_a.call_sites and b in function_b.call_sites:
-                # add them in order
-                for target_a, target_b in zip(function_a.call_sites[a], function_b.call_sites[b]):
-                    possible_matches.add((target_a, target_b))
-                # add them in reverse, since if a new call was added the ordering from each side
-                # will remain constant until the change
-                for target_a, target_b in zip(reversed(function_a.call_sites[a]),
-                                              reversed(function_b.call_sites[b])):
-                    possible_matches.add((target_a, target_b))
-
-        return possible_matches
-
-    def _get_plt_matches(self):
-        plt_matches = []
-        for name, addr in self.bdd_a.loader.main_object.plt.items():
-            if name in self.bdd_b.loader.main_object.plt:
-                plt_matches.append((addr, self._p2.loader.main_object.plt[name]))
-
-        # remove ones that aren't in the interfunction graph, because these seem to not be consistent
-        all_funcs_a = set(self.bdd_a.function_manager.callgraph.nodes())
-        all_funcs_b = set(self.bdd_b.function_manager.callgraph.nodes())
-        plt_matches = [x for x in plt_matches if x[0] in all_funcs_a and x[1] in all_funcs_b]
-
-        return plt_matches
-
-    def _get_name_matches(self):
-        names_to_addrs_a = dict()
-        for f in self.bdd_a.function_manager.values():
-            if not f.name.startswith("sub_"):
-                names_to_addrs_a[f.name] = f.addr
-
-        names_to_addrs_b = dict()
-        for f in self.bdd_b.function_manager.values():
-            if not f.name.startswith("sub_"):
-                names_to_addrs_b[f.name] = f.addr
-
-        name_matches = []
-        for name, addr in names_to_addrs_a.items():
-            if name in names_to_addrs_b:
-                name_matches.append((addr, names_to_addrs_b[name]))
-
-        return name_matches
-
-    def _compute_diff(self):
-        # get the initial matches
-        initial_matches = []
-        # initial_matches += self._get_plt_matches()
-        initial_matches += self._get_function_matches(self.attributes_a, self.attributes_b)
-        for (a, b) in initial_matches:
-            l.debug("Initally matched (%#x, %#x)", a, b)
-
-        # Use a queue so we process matches in the order that they are found
-        to_process = deque(initial_matches)
-
-        # Keep track of which matches we've already added to the queue
-        processed_matches = set((x, y) for (x, y) in initial_matches)
-
-        # Keep a dict of current matches, which will be updated if better matches are found
-        matched_a = dict()
-        matched_b = dict()
-        for (x, y) in processed_matches:
-            matched_a[x] = y
-            matched_b[y] = x
-
-        callgraph_a_nodes = set(self.bdd_a.function_manager.callgraph.nodes())
-        callgraph_b_nodes = set(self.bdd_b.function_manager.callgraph.nodes())
-
-        # while queue is not empty
-        while to_process:
-            (func_a, func_b) = to_process.pop()
-            l.debug("Processing (%#x, %#x)", func_a, func_b)
-
-            # we could find new matches in the successors or predecessors of functions
-            if not self.bdd_a.loader.main_object.contains_addr(func_a):
-                continue
-            if not self.bdd_a.loader.main_object.contains_addr(func_b):
-                continue
-
-            func_a_succ = self.bdd_a.function_manager.callgraph.successors(func_a) if func_a in callgraph_a_nodes else []
-            func_b_succ = self.bdd_b.function_manager.callgraph.successors(func_b) if func_b in callgraph_b_nodes else []
-            func_a_pred = self.bdd_a.function_manager.callgraph.predecessors(func_a) if func_a in callgraph_a_nodes else []
-            func_b_pred = self.bdd_b.function_manager.callgraph.predecessors(func_b) if func_b in callgraph_b_nodes else []
-
-            # get possible new matches
-            new_matches = set(self._get_function_matches(self.attributes_a, self.attributes_b,
-                                                         func_a_succ, func_b_succ))
-            new_matches |= set(self._get_function_matches(self.attributes_a, self.attributes_b,
-                                                          func_a_pred, func_b_pred))
-
-            # could also find matches as function calls of matched basic blocks
-            new_matches.update(self._get_call_site_matches(func_a, func_b))
-
-            # for each of the possible new matches add it if it improves the matching
-            for (x, y) in new_matches:
-                # skip none functions and syscalls
-                if self.bdd_a.function_manager.function(x) is None or self.bdd_a.function_manager.function(x).is_syscall:
-                    continue
-                if self.bdd_b.function_manager.function(y) is None or self.bdd_b.function_manager.function(y).is_syscall:
-                    continue
-
-                if (x, y) not in processed_matches:
-                    processed_matches.add((x, y))
-                    # if it's a better match than what we already have use it
-                    l.debug("Checking function match %s, %s", hex(x), hex(y))
-                    if _is_better_match(x, y, matched_a, matched_b, self.attributes_a, self.attributes_b):
-                        l.debug("Adding potential match %s, %s", hex(x), hex(y))
-                        if x in matched_a:
-                            old_match = matched_a[x]
-                            del matched_b[old_match]
-                            l.debug("Removing previous match (%#x, %#x)", x, old_match)
-                        if y in matched_b:
-                            old_match = matched_b[y]
-                            del matched_a[old_match]
-                            l.debug("Removing previous match (%#x, %#x)", old_match, y)
-                        matched_a[x] = y
-                        matched_b[y] = x
-                        to_process.appendleft((x, y))
-
-        # reformat matches into a set of pairs
-        self.function_matches = set()
-        for x,y in matched_a.items():
-            # only keep if the pair is in the binary ranges
-            if self.bdd_a.loader.main_object.contains_addr(x) and self.bdd_b.loader.main_object.contains_addr(y):
-                self.function_matches.add((x, y))
-
-        # get the unmatched functions
-        self._unmatched_functions_from_a = set(x for x in self.attributes_a.keys() if x not in matched_a)
-        self._unmatched_functions_from_b = set(x for x in self.attributes_b.keys() if x not in matched_b)
-
-        # remove unneeded function diffs
-        for (x, y) in dict(self._function_diffs):
-            if (x, y) not in self.function_matches:
-                del self._function_diffs[(x, y)]
-
-    def lib_result_stats(self):
-        smaller = min((self.bdd_a, self.bdd_b), key=lambda x: len(x.function_manager))
-        bigger = max((self.bdd_a, self.bdd_b), key=lambda x: len(x.function_manager))
-
-        needs_reverse = smaller != self.bdd_a
-        matched = [t[::(-1 if needs_reverse else 1)] for t in self.function_matches]
-        globally_banned_smaller, _ = (self.globally_banned_a, self.globally_banned_b)[::-1 if needs_reverse else 1]
-
-        named = [LibMatch(t[1], t[0], smaller.function_manager.function(t[0]).name, smaller.filename)
-                 for t in matched]
-
-        # import ipdb; ipdb.set_trace()
-
-        allowed_funcs = set(smaller.function_manager.keys()) - globally_banned_smaller
-
-        r = float(len(named)) / float(len(allowed_funcs))
-        return r, named
-
-    def _get_function_matches(self, attributes_a, attributes_b, filter_set_a=None, filter_set_b=None):
-        """
-        :param attributes_a:    A dict of functions to their attributes
-        :param attributes_b:    A dict of functions to their attributes
-
-        The following parameters are optional.
-
-        :param filter_set_a:    A set to limit attributes_a to the functions in this set.
-        :param filter_set_b:    A set to limit attributes_b to the functions in this set.
-        :returns:               A list of tuples of matching objects.
-        """
-        # get the attributes that are in the sets
-        if filter_set_a is None:
-            filtered_attributes_a = {k: v for k, v in attributes_a.items()
-                                     if k not in self.globally_banned_a}
-        else:
-            filtered_attributes_a = {k: v for k, v in attributes_a.items()
-                                     if k in filter_set_a and k not in self.globally_banned_a}
-
-        if filter_set_b is None:
-            filtered_attributes_b = {k: v for k, v in attributes_b.items()
-                                     if k not in self.globally_banned_b}
-        else:
-            filtered_attributes_b = {k: v for k, v in attributes_b.items()
-                                     if k in filter_set_b and k not in self.globally_banned_b}
-
-        # import ipdb; ipdb.set_trace()
-
-        # get closest
-        closest_a = _get_closest_matches(filtered_attributes_a, filtered_attributes_b)
-        closest_b = _get_closest_matches(filtered_attributes_b, filtered_attributes_a)
-
-        # a match (x,y) is good if x is the closest to y and y is the closest to x
-        matches = []
-        for a in closest_a:
-            """
-            if len(closest_a[a]) == 1:
-                match = closest_a[a][0]
-                if len(closest_b[match]) == 1 and closest_b[match][0] == a:
-                    matches.append((a, match))
-            """
-            for b in closest_a[a]:
-                if a in closest_b[b]:
-                    matches.append((a, b))
-
-        return matches
