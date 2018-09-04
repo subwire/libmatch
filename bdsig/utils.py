@@ -3,6 +3,7 @@ import angr
 import logging
 from .lmd import LibMatchDescriptor
 from .iocg import InterObjectCallgraph
+from .libmatch import LibMatch
 
 
 l = logging.getLogger("bdsig.utils")
@@ -52,7 +53,8 @@ def make_iocg(rootDir):
     iocg.dump_path(os.path.join(directory, filename))
     l.info("Done")
 
-def match_all_iocgs(lmd, rootDir):
+def match_all_iocgs(lmd_path, rootDir):
+    lmd = LibMatchDescriptor.load_path(lmd_path)
     candidates = []
     for dirName, subdirList, fileList in os.walk(rootDir):
         l.info('Found directory: %s' % dirName)
@@ -62,10 +64,16 @@ def match_all_iocgs(lmd, rootDir):
                 l.info("Checking IOCG for " + fullfname)
                 try:
                     iocg = InterObjectCallgraph.load_path(fullfname)
-                    lm = iocg.match_against(lmd)
+                    lm = LibMatch(lmd, iocg)
+
+                    candidates.append(lm._second_order_matches)
+
+                    # TODO: implement .result_stats once matching is complete
+                    """
                     r, matched = lm.result_stats()
                     if r > 0.0:
                         candidates.append((r, matched, fname))
+                    """
                 except Exception as e:
                     l.exception("Could not match signature for " + fullfname)
     return candidates
