@@ -1,1 +1,6 @@
 *.pyc
+*.lmd
+*.iocg
+*.idb
+*.egg-info/
+.gdb_history

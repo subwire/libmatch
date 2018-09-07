@@ -9,10 +9,12 @@ from .libmatch import LibMatch
 l = logging.getLogger("bdsig.utils")
 l.setLevel("DEBUG")
 
+PROJECT_KWARGS = {"load_options": {"rebase_granularity": 0x1000}}
+
 def make_all_signatures(rootDir):
     if os.path.isfile(rootDir):
         l.info("Making signature for " + rootDir)
-        LibMatchDescriptor.make_signature_dump(rootDir, load_options={"rebase_granularity": 0x1000})
+        LibMatchDescriptor.make_signature_dump(rootDir, **PROJECT_KWARGS)
     else:
         for dirName, subdirList, fileList in os.walk(rootDir):
             l.info('Found directory: %s' % dirName)
@@ -21,7 +23,7 @@ def make_all_signatures(rootDir):
                     fullfname = os.path.join(dirName, fname)
                     l.info("Making signature for " + fullfname)
                     try:
-                        LibMatchDescriptor.make_signature_dump(fullfname, load_options={"rebase_granularity": 0x1000})
+                        LibMatchDescriptor.make_signature_dump(fullfname, **PROJECT_KWARGS)
                     except angr.errors.AngrCFGError:
                         l.warn("No executable data for %s, skipping" % fullfname)
                     except Exception as e:
@@ -31,7 +33,7 @@ def make_iocg(rootDir):
     lmds = set()
     if os.path.isfile(rootDir):
         l.info("Making signature for " + rootDir)
-        lmds.add(LibMatchDescriptor.make_signature(rootDir, load_options={"rebase_granularity": 0x1000}))
+        lmds.add(LibMatchDescriptor.make_signature(rootDir, **PROJECT_KWARGS))
     else:
         for dirName, subdirList, fileList in os.walk(rootDir):
             l.info('Found directory: %s' % dirName)
@@ -40,7 +42,7 @@ def make_iocg(rootDir):
                     fullfname = os.path.join(dirName, fname)
                     l.info("Making signature for " + fullfname)
                     try:
-                        lmds.add(LibMatchDescriptor.make_signature(fullfname, load_options={"rebase_granularity": 0x1000}))
+                        lmds.add(LibMatchDescriptor.make_signature(fullfname, **PROJECT_KWARGS))
                     except angr.errors.AngrCFGError:
                         l.warn("No executable data for %s, skipping" % fullfname)
                     except Exception as e:

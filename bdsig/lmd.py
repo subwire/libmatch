@@ -4,6 +4,7 @@ import pickle
 import os
 import angr
 from angr.errors import SimEngineError, SimMemoryError
+from pyvex.lifting.gym.arm_spotter import *
 from .iocg import InterObjectCallgraph
 
 
@@ -169,7 +170,7 @@ class LibMatchDescriptor(object):
     Serializes easily into a (relatively) small blob.
     """
     def __init__(self, proj, banned_names=("$d", "$t")):
-        self.cfg = proj.analyses.CFGFast()
+        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
                                 for addr, sp in proj._sim_procedures.iteritems()}
@@ -276,8 +277,10 @@ class LibMatchDescriptor(object):
     @staticmethod
     def make_signature_dump(filename, **project_kwargs):
         lmd = LibMatchDescriptor.make_signature(filename, **project_kwargs)
-        with open(os.path.abspath(filename) + ".lmd", "wb") as f:
+        path = os.path.abspath(filename) + ".lmd"
+        with open(path, "wb") as f:
             lmd.dump(f)
+        return path
 
     @staticmethod
     def load_path(p):
