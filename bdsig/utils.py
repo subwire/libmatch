@@ -58,24 +58,42 @@ def make_iocg(rootDir):
 def match_all_iocgs(lmd_path, rootDir):
     lmd = LibMatchDescriptor.load_path(lmd_path)
     candidates = []
-    for dirName, subdirList, fileList in os.walk(rootDir):
-        l.info('Found directory: %s' % dirName)
-        for fname in fileList:
-            if fname.endswith(".iocg"):
-                fullfname = os.path.join(dirName, fname)
-                l.info("Checking IOCG for " + fullfname)
-                try:
-                    iocg = InterObjectCallgraph.load_path(fullfname)
-                    lm = LibMatch(lmd, iocg)
+    if os.path.isfile(rootDir):
+        l.info("Checking IOCG for " + rootDir)
+        try:
+            iocg = InterObjectCallgraph.load_path(rootDir)
+            lm = LibMatch(lmd, iocg)
 
-                    candidates.append(lm._second_order_matches)
+            candidates.append(lm._second_order_matches)
 
-                    # TODO: implement .result_stats once matching is complete
-                    """
-                    r, matched = lm.result_stats()
-                    if r > 0.0:
-                        candidates.append((r, matched, fname))
-                    """
-                except Exception as e:
-                    l.exception("Could not match signature for " + fullfname)
+            # TODO: implement .result_stats once matching is complete
+            """
+            r, matched = lm.result_stats()
+            if r > 0.0:
+            candidates.append((r, matched, fname))
+            """
+        except Exception as e:
+            l.exception("Could not match signature for " + rootDir)
+            raise
+    else:
+        for dirName, subdirList, fileList in os.walk(rootDir):
+            l.info('Found directory: %s' % dirName)
+            for fname in fileList:
+                if fname.endswith(".iocg"):
+                    fullfname = os.path.join(dirName, fname)
+                    l.info("Checking IOCG for " + fullfname)
+                    try:
+                        iocg = InterObjectCallgraph.load_path(fullfname)
+                        lm = LibMatch(lmd, iocg)
+
+                        candidates.append(lm._second_order_matches)
+
+                        # TODO: implement .result_stats once matching is complete
+                        """
+                        r, matched = lm.result_stats()
+                        if r > 0.0:
+                            candidates.append((r, matched, fname))
+                        """
+                    except Exception as e:
+                        l.exception("Could not match signature for " + fullfname)
     return candidates
