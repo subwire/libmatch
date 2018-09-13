@@ -39,9 +39,10 @@ class InterObjectCallgraph(object):
                            % (sym.name, sym.rebased_addr, lib.filename))
                     continue
                 f = lib.normalized_functions[sym.rebased_addr]
-                if not sym.is_weak and self.lookup_by_name(sym.name):
-                    raise NameCollisionException(f.name)
-                self._functions_by_symbol[sym] = (f, lib)
+                if not sym.is_weak:
+                    if self.lookup_by_name(sym.name):
+                        raise NameCollisionException(f.name + " " + lib.filename)
+                    self._functions_by_symbol[sym] = (f, lib)
 
         # next, add all remaining funcs
         self._all_funcs = {f: l for f, l in self._functions_by_symbol.itervalues()}
