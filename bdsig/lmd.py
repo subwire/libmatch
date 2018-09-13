@@ -37,13 +37,13 @@ class NormalizedBlock(object):
         self.jumpkind = None
 
         for a in addresses:
-            block = project.factory.block(a, opt_level=0)
+            blk = project.factory.block(a, opt_level=0)
             # Ugh, VEX, seriously, not cool. (Fix weird issue with Thumb by supplying size)
-            block = project.factory.block(a, opt_level=0, size=block.size)
+            blk = project.factory.block(a, opt_level=0, size=blk.size)
+            self.instruction_addrs += blk.instruction_addrs
+            irsb = blk.vex
             block._project = None
-            self.instruction_addrs += block.instruction_addrs
-            irsb = block.vex
-            self.blocks.append(block)
+            self.blocks.append(blk)
             self.statements += irsb.statements
             self.all_constants += irsb.all_constants
             self.operations += irsb.operations
