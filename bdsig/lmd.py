@@ -20,6 +20,8 @@ class NormalizedBlock(object):
             for a in function.merged_blocks[block.addr]:
                 addresses.append(a.addr)
 
+        # Before we even start, re-lift the block to unoptimize it
+        block = project.factory.block(block.addr, opt_level=0, size=block.size)
         self.addr = block.addr
         self.addresses = addresses
         self.statements = []
@@ -35,7 +37,9 @@ class NormalizedBlock(object):
         self.jumpkind = None
 
         for a in addresses:
-            block = project.factory.block(a)
+            block = project.factory.block(a, opt_level=0)
+            # Ugh, VEX, seriously, not cool. (Fix weird issue with Thumb by supplying size)
+            block = project.factory.block(a, opt_level=0, size=block.size)
             block._project = None
             self.instruction_addrs += block.instruction_addrs
             irsb = block.vex
