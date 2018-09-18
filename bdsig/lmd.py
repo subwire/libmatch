@@ -124,7 +124,8 @@ class CleLoaderHusk(object):
     """
     def __init__(self, loader):
         self.main_object = CleBackendHusk(loader.main_object)
-
+        self.min_addr = loader.min_addr
+        self.max_addr = loader.max_addr
 
 class CleBackendHusk(object):
     """
@@ -289,6 +290,12 @@ class LibMatchDescriptor(object):
             return ordered_succ
         except (SimMemoryError, SimEngineError):
             return sorted(succ, key=lambda x:x.addr)
+
+
+    def symbol_for_addr(self, addr):
+        for s in self.viable_symbols:
+            if s.rebased_addr == addr:
+                return s
 
     # Creation and Serialization
 

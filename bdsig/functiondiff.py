@@ -359,12 +359,11 @@ class FunctionDiff(object):
         tags_a = [s.tag for s in block_a.statements]
         tags_b = [s.tag for s in block_b.statements]
         consts_a = [c.value for c in block_a.all_constants if not self.lmd_a.loader.main_object.contains_addr(c.value)]
-        consts_b = [c.value for c in block_b.all_constants if not self.lmd_b.loader.main_object.contains_addr(c.value)]
+        consts_b = [c.value for c in block_b.all_constants if not (self.lmd_b.loader.min_addr <= c.value < self.lmd_b.loader.max_addr)]
         all_registers_a = [s.offset for s in block_a.statements if hasattr(s, "offset")]
         all_registers_b = [s.offset for s in block_b.statements if hasattr(s, "offset")]
         jumpkind_a = block_a.jumpkind
         jumpkind_b = block_b.jumpkind
-
         # compute total distance
         total_dist = 0
         total_dist += _levenshtein_distance(tags_a, tags_b)
@@ -690,11 +689,11 @@ class FunctionDiff(object):
 
         # get the difference between the data segments
         # this is hackish
-        if ".bss" in self.lmd_a.loader.main_object.sections_map and \
-                ".bss" in self.lmd_b.loader.main_object.sections_map:
-            bss_a = self.lmd_a.loader.main_object.sections_map[".bss"].min_addr
-            bss_b = self.lmd_b.loader.main_object.sections_map[".bss"].min_addr
-            acceptable_differences.add(bss_b - bss_a)
-            acceptable_differences.add((bss_b - block_b_base) - (bss_a - block_a_base))
+        #if ".bss" in self.lmd_a.loader.main_object.sections_map and \
+        #        ".bss" in self.lmd_b.loader.main_object.sections_map:
+        #    bss_a = self.lmd_a.loader.main_object.sections_map[".bss"].min_addr
+        #    bss_b = self.lmd_b.loader.main_object.sections_map[".bss"].min_addr
+        #    acceptable_differences.add(bss_b - bss_a)
+        #    acceptable_differences.add((bss_b - block_b_base) - (bss_a - block_a_base))
 
         return acceptable_differences
