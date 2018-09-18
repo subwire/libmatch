@@ -217,15 +217,35 @@ class LibMatchDescriptor(object):
         self.banned_addrs = set()
         for faddr in self.function_manager:
             f = self.function_manager.function(faddr)
-            if f.is_plt or f.is_simprocedure or not f.name or f.name in banned_names:
+            if f.is_plt or f.is_simprocedure \
+                    or not f.name or \
+                    f.name in banned_names or \
+                    self.is_trivial(proj, f):
                 self.banned_addrs.add(faddr)
 
         self.viable_functions = set(self.function_attributes) - set(self.banned_addrs)
 
         self.viable_symbols = set()
         for sym in self.loader.main_object.all_symbols:
-            if sym.is_function and sym.binding != "STB_LOCAL" and sym.rebased_addr not in self.banned_addrs:
+            if sym.is_function \
+                    and not sym.is_weak \
+                    and sym.binding != "STB_LOCAL" \
+                    and sym.rebased_addr not in self.banned_addrs:
                 self.viable_symbols.add(sym)
+
+    def is_trivial(self, proj, f):
+        """
+        Return True is a function is "trivial"
+        Right now, this means a ret stub, matching those does us no good
+        :param f:
+        :return:
+        """
+        if len(list(f.block_addrs)) == 1:
+            b = proj.factory.block(list(f.block_addrs)[0])
+            if len(b.instruction_addrs) == 1 and b.vex.jumpkind == 'Ijk_Ret':
+                return True
+        return False
+
 
     def is_hooked(self, addr):
         return addr in self._sim_procedures
