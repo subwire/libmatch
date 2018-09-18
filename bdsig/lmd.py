@@ -142,7 +142,7 @@ class CleBackendHusk(object):
         self.mapped_base = backend.mapped_base
 
         self.symbols_by_addr = backend.symbols_by_addr
-        for sym in self.symbols_by_addr.itervalues():
+        for sym in self.symbols_by_addr.values():
             sym.owner_obj = self
 
     def contains_addr(self, addr):
@@ -177,7 +177,7 @@ class LibMatchDescriptor(object):
         self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
-                                for addr, sp in proj._sim_procedures.iteritems()}
+                                for addr, sp in proj._sim_procedures.items()}
         self.normalized_functions = {}
         self.normalized_blocks = {}
         self.ordered_successors = {}
@@ -192,7 +192,7 @@ class LibMatchDescriptor(object):
                 except (SimMemoryError, SimEngineError):
                     self.normalized_blocks[(f.addr, b.addr)] = None
 
-        for norm_f in self.normalized_functions.itervalues():
+        for norm_f in self.normalized_functions.values():
             for b in norm_f.graph.nodes():
                 ord_succ = self._get_ordered_successors(proj, b, norm_f.graph.successors(b))
                 self.ordered_successors[(norm_f.addr, b.addr)] = ord_succ

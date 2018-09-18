@@ -45,7 +45,7 @@ class InterObjectCallgraph(object):
                     self._functions_by_symbol[sym] = (f, lib)
 
         # next, add all remaining funcs
-        self._all_funcs = {f: l for f, l in self._functions_by_symbol.itervalues()}
+        self._all_funcs = {f: l for f, l in self._functions_by_symbol.values()}
         for lib in self.lib_lmds:
             for faddr in lib.function_manager:
                 f = lib.normalized_functions[faddr]
@@ -68,7 +68,7 @@ class InterObjectCallgraph(object):
         """
         self.callgraph = networkx.DiGraph()
         self.callgraph.add_nodes_from(self._all_funcs)
-        for f, lib in self._all_funcs.iteritems():
+        for f, lib in self._all_funcs.items():
             for succ_addr in lib.callgraph[f.addr]:
                 succ = lib.normalized_functions[succ_addr]
                 if not (succ.is_simprocedure or succ.is_plt):

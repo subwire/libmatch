@@ -196,7 +196,7 @@ def compare_statement_dict(statement_1, statement_2):
         return []
 
     # constants
-    if isinstance(statement_1, (int, long, float, str, unicode)):
+    if isinstance(statement_1, (int, bytes, float, str)):
         if isinstance(statement_1, float) and math.isnan(statement_1) and math.isnan(statement_2):
             return []
         elif statement_1 == statement_2:
@@ -271,6 +271,18 @@ class FunctionDiff(object):
             if not self.blocks_probably_identical(a, b):
                 return False
         return True
+
+    @property
+    def similarity_score(self):
+        """
+        Return the mean similarity for all matched blocks in the function
+        """
+        score = 0.0
+        n = 0
+        for b1, b2 in self._block_matches:
+            score += self.block_similarity(b1, b2)
+            n += 1
+        return score / n
 
     @property
     def identical_blocks(self):
