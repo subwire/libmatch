@@ -32,8 +32,11 @@ class NormalizedBlock(object):
         self.instruction_addrs = []
 
         if block.addr in function.call_sites:
-            self.call_targets = function.call_sites[block.addr]
-
+            targets = function.call_sites[block.addr]
+            for blk, target in self.call_targets:
+                if project.loader.extern_object.contains_addr(target):
+                    target = project.laoder.find_symbol(target).name
+                self.call_targets.append((blk, target))
         self.jumpkind = None
 
         for a in addresses:
@@ -73,7 +76,7 @@ class NormalizedFunction(object):
             done = True
             for node in self.graph.nodes():
                 try:
-                    bl = project.factory.block(node.addr)
+                    bl = project.factory.block(node.addr, opt_level=0)
                 except (SimMemoryError, SimEngineError):
                     continue
 
@@ -124,26 +127,33 @@ class CleLoaderHusk(object):
     """
     def __init__(self, loader):
         self.main_object = CleBackendHusk(loader.main_object)
+        self.extern_object = CleBackendHusk(loader.extern_object)
         self.min_addr = loader.min_addr
         self.max_addr = loader.max_addr
 
 class CleBackendHusk(object):
     """
-    A husk of a typical cle Backend, saving only .segments, .sections, .symbols_by_addr, and .plt.
+    A husk of a typical cle Backend, saving only .segments, .sections, .symbols, and .plt.
     Supports .contains_addr.
     """
     def __init__(self, backend):
         self.sections = backend.sections
         self.segments = backend.segments
-        self.plt = backend.plt
+        try:
+            self.plt = backend.plt
+        except:
+            self.plt = None # Blobs do not have a plt
         self.sections_map = backend.sections_map
         self.arch = backend.arch
         self.provides = backend.provides
-        self.all_symbols = backend.all_symbols
+        try:
+            self.all_symbols = backend.all_symbols
+        except:
+            self.all_symbols = {}
         self.mapped_base = backend.mapped_base
 
-        self.symbols_by_addr = backend.symbols_by_addr
-        for sym in self.symbols_by_addr.values():
+        self.symbols = backend.symbols
+        for sym in self.symbols:
             sym.owner_obj = self
 
     def contains_addr(self, addr):
@@ -227,7 +237,7 @@ class LibMatchDescriptor(object):
         self.viable_functions = set(self.function_attributes) - set(self.banned_addrs)
 
         self.viable_symbols = set()
-        for sym in self.loader.main_object.all_symbols:
+        for sym in self.loader.main_object.symbols:
             if sym.is_function \
                     and not sym.is_weak \
                     and sym.binding != "STB_LOCAL" \
@@ -293,7 +303,11 @@ class LibMatchDescriptor(object):
 
 
     def symbol_for_addr(self, addr):
-        for s in self.viable_symbols:
+        for s in self.loader.main_object.symbols:
+            if s.rebased_addr == addr:
+                return s
+        # Also check the externs
+        for s in self.loader.extern_object.symbols:
             if s.rebased_addr == addr:
                 return s
 

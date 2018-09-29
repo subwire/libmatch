@@ -18,27 +18,94 @@ def collect_best_matches_for_library(binary_filename, libDir):
     iocg_path = libDir.rstrip(os.path.sep) + ".iocg"
 
     # Build the digested version of the binary
-    lmd_name = LibMatchDescriptor.make_signature_dump(binary_filename)
-
+    if isinstance(binary_filename, str):
+        lmd_name = LibMatchDescriptor.make_signature_dump(binary_filename)
+    elif isinstance(binary_filename, angr.Project):
+        lmd_name = LibMatchDescriptor(binary_filename)
     # Match it!
     results = match_all_iocgs(lmd_name, iocg_path)
+    for matches in results:
+        print_matches(lmd_name, matches)
 
-    # Gather the matches based on the functions in the original binary:
-    matches = defaultdict(list)
-    for lib_res in results:
-        for obj_lmd, obj_res in lib_res.items():
-            for obj_func_addr, match in obj_res.items():
-                if match:
-                    target_addr, match_info = match
-                    matches[target_addr].append((obj_lmd, match_info))
+    print("###################################")
+    return postprocess_matches(lmd_name, results)
 
+def postprocess_matches(target_lmd, results):
+    final_matches = {}
+    for matches in results:
+        for f_addr, match_infos in matches.items():
+            if len(match_infos) > 1:
+                continue
+            for lmd, match in match_infos:
+                obj_func_addr = match.function_b.addr
+                sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
+                final_matches[f_addr] = sym_name
+    return final_matches
+
+def object_context_matching(lmd_name, matches):
+    target_lmd = LibMatchDescriptor.load_path(target_lmd_name)
+
+    # now check around:
+    for f_addr, match_infos, in matches.items():
+        # For every imprecise match
+        if len(match_infos > 1):
+            candidate_objs = None
+            # Are either of the neighboring functions from an object in our candidates?
+
+def matches_list(matches):
+    return [(x, y) for x, y in matches.items()]
+
+def get_previous_match(f_addr, precise_matches):
+    sorted_matches = sorted(precise_matches, key=lambda m: m[0])
+    idx = None
+    for i, m in enumerate(sorted_matches):
+        a, mx = m
+        if f_addr == a:
+            idx = i
+            break
+    assert idx is not None
+    if idx == 0:
+        return None
+    prev_a, prev_mx = sorted_matches[idx-1]
+    if len(prev_mx) == 1: # is the match precise
+        return prev_a, prev_mx
+    return None
+
+
+def get_next_match(f_addr, precise_matches):
+    sorted_matches = sorted(precise_matches, key=lambda m: m[0])
+    idx = None
+    for i, m in enumerate(sorted_matches):
+        a, mx = m
+        if f_addr == a:
+            idx = i
+            break
+    assert idx is not None
+    if idx == len(sorted_matches) - 1:
+        return None
+    next_a, next_mx = sorted_matches[idx+1]
+    if len(next_mx) == 1: # is the match precise
+        return next_a, next_mx
+    return None
+
+
+def print_matches(target_lmd_name, matches):
+    if isinstance(target_lmd_name, LibMatchDescriptor):
+        target_lmd = target_lmd_name
+    else:
+        target_lmd = LibMatchDescriptor.load_path(target_lmd_name)
     for f_addr, match_infos in matches.items():
-        print("Function at %#08x:" % f_addr)
+        if target_lmd.symbol_for_addr(f_addr):
+            # For easier scoring
+            s = target_lmd.symbol_for_addr(f_addr)
+            print("Function at %#08x[%s]:" % (f_addr, s.name))
+        else:
+            print("Function at %#08x:" % f_addr)
         for lmd, match in match_infos:
             obj_func_addr = match.function_b.addr
             sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
             print("[%f] %s(%#08x) in %s" % (match.similarity_score, sym_name, obj_func_addr, lmd.filename))
-    import IPython; IPython.embed()
+
 
 def make_all_signatures(rootDir):
     if os.path.isfile(rootDir):
@@ -87,7 +154,10 @@ def make_iocg(rootDir):
 
 
 def match_all_iocgs(lmd_path, rootDir):
-    lmd = LibMatchDescriptor.load_path(lmd_path)
+    if isinstance(lmd_path, LibMatchDescriptor):
+        lmd = lmd_path
+    else:
+        lmd = LibMatchDescriptor.load_path(lmd_path)
     candidates = []
     if os.path.isfile(rootDir):
         l.info("Checking IOCG for " + rootDir)
@@ -95,7 +165,7 @@ def match_all_iocgs(lmd_path, rootDir):
             iocg = InterObjectCallgraph.load_path(rootDir)
             lm = LibMatch(lmd, iocg)
 
-            candidates.append(lm._second_order_matches)
+            candidates.append(lm._candidate_matches)
 
             # TODO: implement .result_stats once matching is complete
             """
