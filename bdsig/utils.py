@@ -30,6 +30,11 @@ def collect_best_matches_for_library(binary_filename, libDir):
     print("###################################")
     return postprocess_matches(lmd_name, results)
 
+def score_it(matches, bin_lmd):
+    for sym in bin_lmd.viable_symbols:
+        import IPython; IPython.embed()
+
+
 def postprocess_matches(target_lmd, results):
     final_matches = {}
     for matches in results:

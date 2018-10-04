@@ -40,11 +40,9 @@ class NormalizedBlock(object):
         self.jumpkind = None
 
         for a in addresses:
-            blk = project.factory.block(a, opt_level=0)
+            block = project.factory.block(a, opt_level=-1)
             # Ugh, VEX, seriously, not cool. (Fix weird issue with Thumb by supplying size)
-            blk = project.factory.block(a, opt_level=0, size=blk.size)
-            self.instruction_addrs += blk.instruction_addrs
-            irsb = blk.vex
+            block = project.factory.block(a, opt_level=-1, size=blk.size)
             block._project = None
             self.blocks.append(blk)
             self.statements += irsb.statements
@@ -76,7 +74,7 @@ class NormalizedFunction(object):
             done = True
             for node in self.graph.nodes():
                 try:
-                    bl = project.factory.block(node.addr, opt_level=0)
+                    bl = project.factory.block(node.addr, opt_level=-1)
                 except (SimMemoryError, SimEngineError):
                     continue
 
@@ -289,7 +287,7 @@ class LibMatchDescriptor(object):
             # add them in order of the vex
             succ = set(succ)
             ordered_succ = []
-            bl = proj.factory.block(block.addr)
+            bl = proj.factory.block(block.addr, opt_level=-1)
             for x in bl.vex.all_constants:
                 if x in succ:
                     ordered_succ.append(x)
