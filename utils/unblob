@@ -1,0 +1,136 @@
+#!/usr/bin/env python
+import yaml
+import makeelf
+import argparse
+from bdsig.utils import collect_best_matches_for_library
+import logging
+import autoblob
+import angr
+
+log = logging.getLogger('unblob')
+
+def parse_opts():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("infile")
+    parser.add_argument('outfile')
+    parser.add_argument("--debug", action='store_true')
+
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument("-U", dest='mode_normal', default=True, action='store_true', help='Unblobulate! (default)')
+    modes.add_argument("-X", dest='mode_extract', action='store_true', help='Extract')
+    modes.add_argument("-B", dest='mode_build', action='store_true', help="Build library signatures")
+
+    input_opts = parser.add_argument_group("Input options")
+    input_opts.add_argument('--base-address', type=int, help="Manually specify the base address of the binary")
+    input_opts.add_argument('--entry-point', type=int, help="Manually specify the entry point of the binary")
+    input_opts.add_argument('--arch', help="Manually specify the architecture to use")
+    input_opts.add_argument('--cortex', help='Fast Cortex-M loading mode', action='store_true')
+
+    symbol_opts = parser.add_argument_group("Symbol Recovery Options")
+    symbol_opts.add_argument("-S", "--disable-symbol-recovery", help="Enable symbol recovery", action='store_true')
+    symbol_opts.add_argument('-F', "--fudge-factor", help="Lowest similarity score to consider a 'match' for symbol recovery")
+    symbol_opts.add_argument('-L', "--lmds", help="Directory of LMD files to process (required)")
+    symbol_opts.add_argument('-1', "--first-order", help="Only use the first-order metric to gather symbols", action='store_true')
+    symbol_opts.add_argument('-2', "--second-order", help="Only use the third-order metric to gather symbols",
+                           action='store_true')
+    symbol_opts.add_argument('-3', "--third-order", help="Only use the third-order metric to gather symbols",
+                       action='store_true')
+    symbol_opts.add_argument('--scoring', help="Enable scoring mode, use a binary with symbols to score symbol recovery accuracy", action='store_true')
+
+    output_opts = parser.add_argument_group('Output Options')
+    output_opts.add_argument("-E", "--elf", help="Produce an ELF (Default)", action='store_true')
+    output_opts.add_argument("-Y", "--yaml", help="Produce a YAML file", action='store_true')
+    opts = parser.parse_args()
+
+
+    if opts.mode_normal:
+        if not opts.disable_symbol_recovery and not opts.lmds:
+            parser.error("To use symbol recovery, you must specify signatures to match with using -L (or disable symbol recovery)")
+    elif opts.mode_build:
+        if len(args) != 1:
+            parser.error("You must specify the directory of libraries to build signatures for")
+    elif opts.mode_extract:
+        parser.error("Not implemented yet")
+    return opts
+
+
+def quick_cortex_parser(infile):
+    """
+    For a fully-formed Cortex-M code image:
+       The first word will be the little-endian initial stack pointer
+       The second word will be the little endian entry point (0'th interrupt or reset vector)
+    We guess the base address by rounding the entry point, Cortex-M's are pretty small :)
+
+    :param infile:
+    :return:
+    """
+    with open(infile, 'rb') as f:
+        initial_sp = struct.unpack('<I', f.read(4))[0]
+        entry = struct.unpack('<I', f.read(4))[0]
+        base = entry & 0xffff0000  # wow that's gross
+        return base, entry
+
+def load_it(opts):
+    try:
+        # Are we doing this manually?
+        if opts.base_address and opts.entry_point and opts.arch:
+            p = angr.Project(opts.infile,
+                             main_opts={'base_addr': opts.base,
+                                        'arch': opts.arch,
+                                        'backend': 'blob',
+                                        'entry_point': opts.entry,
+                                        'force_rebase': True})
+        else:
+            # Pray.
+            p = angr.Project(opts.infile)
+        return p
+    except:
+        log.exception("Error loading binary")
+        return None
+
+
+def make_yaml(project, symbol_map, opts):
+    # Do it
+    the_dict = {}
+    the_dict['architecture'] = project.arch.name
+    the_dict['base_address'] = project.loader.main_object.min_addr
+    the_dict['entry_point'] = project.entry
+    the_dict['symbols'] = symbol_map
+    with open(opts.outfile, 'w') as f:
+        yaml.dump(the_dict, stream=f)
+
+
+def do_normal(opts):
+    # Dissect the binary.
+    if not opts.base_address or not opts.entry_point or not opts.arch:
+        # We have some work to do....
+        if opts.cortex:
+            # Cortex mode
+            # Assume Arch=ARMEL
+            opts.arch = 'ARMEL'
+            opts.base_address, opts.entry_point = quick_cortex_parser(opts.infile)
+    project = load_it(opts)
+    if not project:
+        sys.exit(1)
+    log.info("################")
+    log.info("Detected architecture: %s" % project.arch.name)
+    log.info("Detected base address: %#08x" % project.loader.main_object.min_addr)
+    log.info("Detected entry point: %#08x" % project.entry)
+
+    # Now do symbol recovery
+    symbol_map = None
+    if not opts.disable_symbol_recovery:
+        lib_dir = opts.lmds
+        symbol_map = collect_best_matches_for_library(project, lib_dir)
+
+    # Create the output
+    if opts.elf:
+        make_elf(project, symbol_map, opts)
+    elif opts.yaml:
+        make_yaml(project, symbol_map, opts)
+
+if __name__ == '__main__':
+    logging.basicConfig()
+    opts = parse_opts()
+    if opts.mode_normal:
+        do_normal(opts)
