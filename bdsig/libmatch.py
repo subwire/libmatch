@@ -101,25 +101,28 @@ class LibMatch(object):
         # Get the iocg entry for each candidate match
         target_func = list(matches)[0][1].function_a
         target_callees = []
-        for from_block, callee in target_func.call_sites.items():
-            if len(callee) > 1:
-                l.error("More than one callee in a callsite, that's weird: %#008x %s" % (from_block.addr, repr(target_func.call_sites)))
-            callee = callee[0]
-            if not self.binary_lmd.loader.main_object.contains_addr(callee):
-                # A jumpout! Fuck.
-                callee_name = "UnresolvableCallTarget"
-                target_callees.append((callee, callee_name))
-            elif callee not in self._candidate_matches or len(self._candidate_matches[callee]) == 0:
-                l.error("Cannot disambiguate function at %#08x, unmatched call to %#08x" % (f_addr, callee))
-                return  # We're fucked
-            else:
-                callee_matches = self._candidate_matches[callee]
-                if len(callee_matches) > 1:
-                    l.error("Recursively resolving %#08x" % callee)
-                    self._narrow_third_order(callee, callee_matches)
-                m_lmd, m_fd = callee_matches[0]
-                callee_name = m_lmd.symbol_for_addr(m_fd.function_b.addr).name
-                target_callees.append((callee, callee_name))
+        for from_block, callees in target_func.call_sites.items():
+            for callee in callees:
+                if not self.binary_lmd.loader.main_object.contains_addr(callee):
+                    # A jumpout! Fuck.
+                    callee_name = "UnresolvableTarget"
+                    target_callees.append((callee, callee_name))
+                elif callee in self.binary_lmd.banned_addrs:
+                    callee_name = "Ignored"
+                    target_callees.append((callee, callee_name))
+                elif callee not in self._candidate_matches or len(self._candidate_matches[callee]) == 0:
+                    l.error("Cannot disambiguate function at %#08x, unmatched call to %#08x" % (f_addr, callee))
+                    return  # We're fucked
+                else:
+                    callee_matches = self._candidate_matches[callee]
+                    if len(callee_matches) > 1:
+                        l.error("Recursively resolving %#08x" % callee)
+                        self._narrow_third_order(callee, callee_matches)
+                        if len(self._candidate_matches[callee]) > 1:
+                            l.error("Failed to narrow down call to %#08x" % callee)
+                    m_lmd, m_fd = callee_matches[0]
+                    callee_name = m_lmd.symbol_for_addr(m_fd.function_b.addr).name
+                    target_callees.append((callee, callee_name))
         if not target_callees:
             l.error("No calls in function %#08x, cannot disambiguate" % f_addr)
             return
@@ -134,12 +137,13 @@ class LibMatch(object):
             for targ_callee, lib_callee in zip(target_callees, lib_callees):
                 targ_callee_addr, targ_callee_name = targ_callee
                 lib_callee_name = match_lmd.symbol_for_addr(lib_callee).name
-                if targ_callee_name == "UnresolvableCallTarget":
+                if targ_callee_name == "Ignored":
                     l.debug("Ignoring unresolvable call to %#08x" % targ_callee_addr)
-                    pass
+                    continue
                 if targ_callee_name != lib_callee_name:
                     l.debug("\tRuling out %s due to mismatched call (%s != %s)" % (match_name, targ_callee_name, lib_callee_name))
                     break
+                l.debug("\t\tMatched call to %s" % targ_callee_name)
             else:
                 self._candidate_matches[f_addr].append((match_lmd, match_diff))
                 l.error("Resolved call to %#08x to %s via callgraph" % (f_addr, match_name))

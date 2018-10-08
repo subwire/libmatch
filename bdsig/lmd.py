@@ -42,9 +42,11 @@ class NormalizedBlock(object):
         for a in addresses:
             block = project.factory.block(a, opt_level=-1)
             # Ugh, VEX, seriously, not cool. (Fix weird issue with Thumb by supplying size)
-            block = project.factory.block(a, opt_level=-1, size=blk.size)
+            block = project.factory.block(a, opt_level=-1, size=block.size)
+            self.instruction_addrs += block.instruction_addrs
+            irsb = block.vex
             block._project = None
-            self.blocks.append(blk)
+            self.blocks.append(block)
             self.statements += irsb.statements
             self.all_constants += irsb.all_constants
             self.operations += irsb.operations
@@ -67,7 +69,8 @@ class NormalizedFunction(object):
         self.merged_blocks = dict()
         self.orig_function = function
         self.addr = self.orig_function.addr
-
+        if self.addr == 0x080038f1:
+            import ipdb; ipdb.set_trace()
         # find nodes which end in call and combine them
         done = False
         while not done:
@@ -103,12 +106,21 @@ class NormalizedFunction(object):
         # set up call sites
         for n in self.graph.nodes():
             call_targets = []
+            merged_block = None
+            for mb in self.merged_blocks:
+                if n.addr == mb.addr:
+                    merged_block = mb
+                    break
+
             if n.addr in self.orig_function.get_call_sites():
                 call_targets.append(self.orig_function.get_call_target(n.addr))
-            if n.addr in self.merged_blocks:
-                for block in self.merged_blocks[n]:
+            if merged_block:
+                for block in self.merged_blocks[merged_block]:
                     if block.addr in self.orig_function.get_call_sites():
                         call_targets.append(self.orig_function.get_call_target(block.addr))
+            if self.orig_function.endpoints_with_type['transition']:
+                for tt in self.orig_function.endpoints_with_type['transition']:
+                    call_targets.append(tt.successors()[0].addr)
             if len(call_targets) > 0:
                 self.call_sites[n] = call_targets
 
@@ -152,7 +164,7 @@ class CleBackendHusk(object):
 
         self.symbols = backend.symbols
         for sym in self.symbols:
-            sym.owner_obj = self
+            sym.owner = self
 
     def contains_addr(self, addr):
         """
