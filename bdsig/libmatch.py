@@ -133,7 +133,10 @@ class LibMatch(object):
         for match_lmd, match_diff in matches:
             match_name = match_diff.function_b.name
             # Get the addresses of each function that library calls.
-            lib_callees = [lol[0] for lol in match_diff.function_b.call_sites.values()]
+            lib_callees = []
+            for lol in match_diff.function_b.call_sites.values():
+                for lmao in lol:
+                    lib_callees.append(lmao)
             for targ_callee, lib_callee in zip(target_callees, lib_callees):
                 targ_callee_addr, targ_callee_name = targ_callee
                 lib_callee_name = match_lmd.symbol_for_addr(lib_callee).name

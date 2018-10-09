@@ -69,8 +69,6 @@ class NormalizedFunction(object):
         self.merged_blocks = dict()
         self.orig_function = function
         self.addr = self.orig_function.addr
-        if self.addr == 0x080038f1:
-            import ipdb; ipdb.set_trace()
         # find nodes which end in call and combine them
         done = False
         while not done:
@@ -99,7 +97,6 @@ class NormalizedFunction(object):
                     if succ in self.merged_blocks:
                         self.merged_blocks[node] += self.merged_blocks[succ]
                         del self.merged_blocks[succ]
-
                     # stop iterating and start over
                     break
 
@@ -195,7 +192,7 @@ class LibMatchDescriptor(object):
     Serializes easily into a (relatively) small blob.
     """
     def __init__(self, proj, banned_names=("$d", "$t")):
-        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True)
+        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True, normalize=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
                                 for addr, sp in proj._sim_procedures.items()}

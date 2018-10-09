@@ -25,14 +25,11 @@ def collect_best_matches_for_library(binary_filename, libDir):
     # Match it!
     results = match_all_iocgs(lmd_name, iocg_path)
     for matches in results:
-        print_matches(lmd_name, matches)
+        score_matches(lmd_name, matches)
 
     print("###################################")
     return postprocess_matches(lmd_name, results)
 
-def score_it(matches, bin_lmd):
-    for sym in bin_lmd.viable_symbols:
-        import IPython; IPython.embed()
 
 
 def postprocess_matches(target_lmd, results):
@@ -93,8 +90,60 @@ def get_next_match(f_addr, precise_matches):
         return next_a, next_mx
     return None
 
+from clint.textui.colored import red, green, yellow
+def score_matches(target_lmd_name, matches):
+    if isinstance(target_lmd_name, LibMatchDescriptor):
+        target_lmd = target_lmd_name
+    else:
+        target_lmd = LibMatchDescriptor.load_path(target_lmd_name)
+    precise_matches = 0
+    imprecise_matches = 0
+    incorrect_matches = 0
+    missing = 0
+    total_syms = len(target_lmd.viable_symbols)
+    ignored = 0
+    for sym in target_lmd.viable_symbols:
+        f_addr = sym.rebased_addr
+        if f_addr in target_lmd.banned_addrs:
+            ingored += 1
+            print("%#08x => Junk" % (f_addr))
+        elif f_addr in matches:
+            match_infos = matches[f_addr]
+            if len(match_infos) == 1:
+                for lmd, match in match_infos:
+                    obj_func_addr = match.function_b.addr
+                    sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
+                    if sym_name == sym.name:
+                        print(green("%#08x => %s(%f) [Correct!] in %s" % (f_addr, sym_name, match.similarity_score, lmd.filename)))
+                        precise_matches += 1
+                    else:
+                        print(red("%#08x => %s(%f) [WRONG, %s] in %s" % (f_addr, sym_name, match.similarity_score, sym.name, lmd.filename)))
+                        incorrect_matches += 1
+            else:
+                imprecise_matches += 1
+                print(yellow("%#08x" % f_addr))
+                for lmd, match in match_infos:
+                    obj_func_addr = match.function_b.addr
+                    sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
+                    if sym_name == sym.name:
+                        print(green("\t=> %s(%f) in %s" % (sym_name, match.similarity_score, lmd.filename)))
+                    else:
+                        print(yellow("\t=> %s(%f) in %s" % (sym_name, match.similarity_score, lmd.filename)))
+        else:
+            missing += 1
+            print(red("%#08x => %s(UNMATCHED)" % (f_addr, sym.name)))
 
-def print_matches(target_lmd_name, matches):
+    print("Matched symbols: %d" % precise_matches)
+    print("Missing symbols: %d" % missing)
+    print("Incorrect symbols: %d" % incorrect_matches)
+    print("Imprecise matches: %d" % imprecise_matches)
+    print("Total symbols: %d " % total_syms)
+    print("Hit rate: %f" % (precise_matches / total_syms))
+    print("Error rate: %f" % (incorrect_matches / total_syms))
+    print("Collision rate: %f" % (imprecise_matches / total_syms))
+
+
+def print_matches(target, lmd_name, matches):
     if isinstance(target_lmd_name, LibMatchDescriptor):
         target_lmd = target_lmd_name
     else:
