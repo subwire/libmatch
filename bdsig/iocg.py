@@ -39,12 +39,13 @@ class InterObjectCallgraph(object):
                            % (sym.name, sym.rebased_addr, lib.filename))
                     continue
                 f = lib.normalized_functions[sym.rebased_addr]
-                if not sym.is_weak and self.lookup_by_name(sym.name):
-                    raise NameCollisionException(f.name)
-                self._functions_by_symbol[sym] = (f, lib)
+                if not sym.is_weak:
+                    if self.lookup_by_name(sym.name):
+                        raise NameCollisionException(f.name + " " + lib.filename)
+                    self._functions_by_symbol[sym] = (f, lib)
 
         # next, add all remaining funcs
-        self._all_funcs = {f: l for f, l in self._functions_by_symbol.itervalues()}
+        self._all_funcs = {f: l for f, l in self._functions_by_symbol.values()}
         for lib in self.lib_lmds:
             for faddr in lib.function_manager:
                 f = lib.normalized_functions[faddr]
@@ -67,7 +68,7 @@ class InterObjectCallgraph(object):
         """
         self.callgraph = networkx.DiGraph()
         self.callgraph.add_nodes_from(self._all_funcs)
-        for f, lib in self._all_funcs.iteritems():
+        for f, lib in self._all_funcs.items():
             for succ_addr in lib.callgraph[f.addr]:
                 succ = lib.normalized_functions[succ_addr]
                 if not (succ.is_simprocedure or succ.is_plt):

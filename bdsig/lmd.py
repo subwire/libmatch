@@ -4,6 +4,7 @@ import pickle
 import os
 import angr
 from angr.errors import SimEngineError, SimMemoryError
+from pyvex.lifting.gym.arm_spotter import *
 from .iocg import InterObjectCallgraph
 
 
@@ -19,6 +20,8 @@ class NormalizedBlock(object):
             for a in function.merged_blocks[block.addr]:
                 addresses.append(a.addr)
 
+        # Before we even start, re-lift the block to unoptimize it
+        block = project.factory.block(block.addr, opt_level=0, size=block.size)
         self.addr = block.addr
         self.addresses = addresses
         self.statements = []
@@ -29,15 +32,20 @@ class NormalizedBlock(object):
         self.instruction_addrs = []
 
         if block.addr in function.call_sites:
-            self.call_targets = function.call_sites[block.addr]
-
+            targets = function.call_sites[block.addr]
+            for blk, target in self.call_targets:
+                if project.loader.extern_object.contains_addr(target):
+                    target = project.laoder.find_symbol(target).name
+                self.call_targets.append((blk, target))
         self.jumpkind = None
 
         for a in addresses:
-            block = project.factory.block(a)
-            block._project = None
+            block = project.factory.block(a, opt_level=-1)
+            # Ugh, VEX, seriously, not cool. (Fix weird issue with Thumb by supplying size)
+            block = project.factory.block(a, opt_level=-1, size=block.size)
             self.instruction_addrs += block.instruction_addrs
             irsb = block.vex
+            block._project = None
             self.blocks.append(block)
             self.statements += irsb.statements
             self.all_constants += irsb.all_constants
@@ -61,14 +69,13 @@ class NormalizedFunction(object):
         self.merged_blocks = dict()
         self.orig_function = function
         self.addr = self.orig_function.addr
-
         # find nodes which end in call and combine them
         done = False
         while not done:
             done = True
             for node in self.graph.nodes():
                 try:
-                    bl = project.factory.block(node.addr)
+                    bl = project.factory.block(node.addr, opt_level=-1)
                 except (SimMemoryError, SimEngineError):
                     continue
 
@@ -90,19 +97,27 @@ class NormalizedFunction(object):
                     if succ in self.merged_blocks:
                         self.merged_blocks[node] += self.merged_blocks[succ]
                         del self.merged_blocks[succ]
-
                     # stop iterating and start over
                     break
 
         # set up call sites
         for n in self.graph.nodes():
             call_targets = []
+            merged_block = None
+            for mb in self.merged_blocks:
+                if n.addr == mb.addr:
+                    merged_block = mb
+                    break
+
             if n.addr in self.orig_function.get_call_sites():
                 call_targets.append(self.orig_function.get_call_target(n.addr))
-            if n.addr in self.merged_blocks:
-                for block in self.merged_blocks[n]:
+            if merged_block:
+                for block in self.merged_blocks[merged_block]:
                     if block.addr in self.orig_function.get_call_sites():
                         call_targets.append(self.orig_function.get_call_target(block.addr))
+            if self.orig_function.endpoints_with_type['transition']:
+                for tt in self.orig_function.endpoints_with_type['transition']:
+                    call_targets.append(tt.successors()[0].addr)
             if len(call_targets) > 0:
                 self.call_sites[n] = call_targets
 
@@ -119,26 +134,34 @@ class CleLoaderHusk(object):
     """
     def __init__(self, loader):
         self.main_object = CleBackendHusk(loader.main_object)
-
+        self.extern_object = CleBackendHusk(loader.extern_object)
+        self.min_addr = loader.min_addr
+        self.max_addr = loader.max_addr
 
 class CleBackendHusk(object):
     """
-    A husk of a typical cle Backend, saving only .segments, .sections, .symbols_by_addr, and .plt.
+    A husk of a typical cle Backend, saving only .segments, .sections, .symbols, and .plt.
     Supports .contains_addr.
     """
     def __init__(self, backend):
         self.sections = backend.sections
         self.segments = backend.segments
-        self.plt = backend.plt
+        try:
+            self.plt = backend.plt
+        except:
+            self.plt = None # Blobs do not have a plt
         self.sections_map = backend.sections_map
         self.arch = backend.arch
         self.provides = backend.provides
-        self.all_symbols = backend.all_symbols
+        try:
+            self.all_symbols = backend.all_symbols
+        except:
+            self.all_symbols = {}
         self.mapped_base = backend.mapped_base
 
-        self.symbols_by_addr = backend.symbols_by_addr
-        for sym in self.symbols_by_addr.itervalues():
-            sym.owner_obj = self
+        self.symbols = backend.symbols
+        for sym in self.symbols:
+            sym.owner = self
 
     def contains_addr(self, addr):
         """
@@ -169,10 +192,12 @@ class LibMatchDescriptor(object):
     Serializes easily into a (relatively) small blob.
     """
     def __init__(self, proj, banned_names=("$d", "$t")):
-        self.cfg = proj.analyses.CFGFast()
+        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True, normalize=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
-                                for addr, sp in proj._sim_procedures.iteritems()}
+                                for addr, sp in proj._sim_procedures.items()}
+
+        self.banned_addrs = set()
         self.normalized_functions = {}
         self.normalized_blocks = {}
         self.ordered_successors = {}
@@ -187,7 +212,7 @@ class LibMatchDescriptor(object):
                 except (SimMemoryError, SimEngineError):
                     self.normalized_blocks[(f.addr, b.addr)] = None
 
-        for norm_f in self.normalized_functions.itervalues():
+        for norm_f in self.normalized_functions.values():
             for b in norm_f.graph.nodes():
                 ord_succ = self._get_ordered_successors(proj, b, norm_f.graph.successors(b))
                 self.ordered_successors[(norm_f.addr, b.addr)] = ord_succ
@@ -208,19 +233,42 @@ class LibMatchDescriptor(object):
 
         # Do this last because it is somewhat dangerous (must modify symbol owner object references)
         self.loader = CleLoaderHusk(proj.loader)
-
-        self.banned_addrs = set()
+        # aaaand cleanup
         for faddr in self.function_manager:
             f = self.function_manager.function(faddr)
-            if f.is_plt or f.is_simprocedure or not f.name or f.name in banned_names:
+            if f.is_plt or f.is_simprocedure \
+                    or not f.name or \
+                    f.name in banned_names or \
+                    self.is_trivial(proj, f):
                 self.banned_addrs.add(faddr)
 
         self.viable_functions = set(self.function_attributes) - set(self.banned_addrs)
 
         self.viable_symbols = set()
-        for sym in self.loader.main_object.all_symbols:
-            if sym.is_function and sym.binding != "STB_LOCAL" and sym.rebased_addr not in self.banned_addrs:
+        for sym in self.loader.main_object.symbols:
+            if sym.is_function \
+                    and not sym.is_hidden \
+                    and not sym.is_weak \
+                    and sym.binding != "STB_LOCAL" \
+                    and sym.rebased_addr not in self.banned_addrs:
                 self.viable_symbols.add(sym)
+        proj.loader.close()
+        del proj.loader
+        
+    def is_trivial(self, proj, f):
+        """
+        Return True is a function is "trivial"
+        Right now, this means a ret stub, matching those does us no good
+        :param f:
+        :return:
+        """
+        # The function is one block.
+        if len(list(f.block_addrs)) == 1:
+            b = proj.factory.block(list(f.block_addrs)[0])
+            if len(b.instruction_addrs) <= 2 and b.vex.jumpkind == 'Ijk_Ret':
+                return True
+        return False
+
 
     def is_hooked(self, addr):
         return addr in self._sim_procedures
@@ -253,7 +301,7 @@ class LibMatchDescriptor(object):
             # add them in order of the vex
             succ = set(succ)
             ordered_succ = []
-            bl = proj.factory.block(block.addr)
+            bl = proj.factory.block(block.addr, opt_level=-1)
             for x in bl.vex.all_constants:
                 if x in succ:
                     ordered_succ.append(x)
@@ -264,6 +312,16 @@ class LibMatchDescriptor(object):
             return ordered_succ
         except (SimMemoryError, SimEngineError):
             return sorted(succ, key=lambda x:x.addr)
+
+
+    def symbol_for_addr(self, addr):
+        for s in self.loader.main_object.symbols:
+            if s.rebased_addr == addr:
+                return s
+        # Also check the externs
+        for s in self.loader.extern_object.symbols:
+            if s.rebased_addr == addr:
+                return s
 
     # Creation and Serialization
 
@@ -276,8 +334,10 @@ class LibMatchDescriptor(object):
     @staticmethod
     def make_signature_dump(filename, **project_kwargs):
         lmd = LibMatchDescriptor.make_signature(filename, **project_kwargs)
-        with open(os.path.abspath(filename) + ".lmd", "wb") as f:
+        path = os.path.abspath(filename) + ".lmd"
+        with open(path, "wb") as f:
             lmd.dump(f)
+        return path
 
     @staticmethod
     def load_path(p):

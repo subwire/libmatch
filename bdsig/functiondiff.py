@@ -177,6 +177,9 @@ def differing_constants(block_a, block_b):
         differences = compare_statement_dict(statement, statement_2)
         for d in differences:
             if d.type != DIFF_VALUE:
+                if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
+                    import ipdb;
+                    ipdb.set_trace()
                 raise UnmatchedStatementsException("Instruction has changed")
             else:
                 changes.append(ConstantChange(current_offset, d.value_a, d.value_b))
@@ -196,7 +199,7 @@ def compare_statement_dict(statement_1, statement_2):
         return []
 
     # constants
-    if isinstance(statement_1, (int, long, float, str)):
+    if isinstance(statement_1, (int, bytes, float, str)):
         if isinstance(statement_1, float) and math.isnan(statement_1) and math.isnan(statement_2):
             return []
         elif statement_1 == statement_2:
@@ -273,6 +276,18 @@ class FunctionDiff(object):
         return True
 
     @property
+    def similarity_score(self):
+        """
+        Return the mean similarity for all matched blocks in the function
+        """
+        score = 0.0
+        n = 0
+        for b1, b2 in self._block_matches:
+            score += self.block_similarity(b1, b2)
+            n += 1
+        return score / n
+
+    @property
     def identical_blocks(self):
         """
         :returns: A list of block matches which appear to be identical
@@ -347,12 +362,11 @@ class FunctionDiff(object):
         tags_a = [s.tag for s in block_a.statements]
         tags_b = [s.tag for s in block_b.statements]
         consts_a = [c.value for c in block_a.all_constants if not self.lmd_a.loader.main_object.contains_addr(c.value)]
-        consts_b = [c.value for c in block_b.all_constants if not self.lmd_b.loader.main_object.contains_addr(c.value)]
+        consts_b = [c.value for c in block_b.all_constants if not (self.lmd_b.loader.min_addr <= c.value < self.lmd_b.loader.max_addr)]
         all_registers_a = [s.offset for s in block_a.statements if hasattr(s, "offset")]
         all_registers_b = [s.offset for s in block_b.statements if hasattr(s, "offset")]
         jumpkind_a = block_a.jumpkind
         jumpkind_b = block_b.jumpkind
-
         # compute total distance
         total_dist = 0
         total_dist += _levenshtein_distance(tags_a, tags_b)
@@ -399,6 +413,9 @@ class FunctionDiff(object):
         try:
             diff_constants = FunctionDiff._block_diff_constants(block_a, block_b)
         except UnmatchedStatementsException:
+            if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
+                import ipdb;
+                ipdb.set_trace()
             return False
 
         if not check_constants:
@@ -663,8 +680,10 @@ class FunctionDiff(object):
         # keep a set of the acceptable differences in constants between the two blocks
         acceptable_differences = set()
         acceptable_differences.add(0)
-
-        block_a_base = block_a.instruction_addrs[0]
+        try:
+            block_a_base = block_a.instruction_addrs[0]
+        except:
+            import ipdb; ipdb.set_trace()
         block_b_base = block_b.instruction_addrs[0]
         acceptable_differences.add(block_b_base - block_a_base)
 
@@ -678,11 +697,11 @@ class FunctionDiff(object):
 
         # get the difference between the data segments
         # this is hackish
-        if ".bss" in self.lmd_a.loader.main_object.sections_map and \
-                ".bss" in self.lmd_b.loader.main_object.sections_map:
-            bss_a = self.lmd_a.loader.main_object.sections_map[".bss"].min_addr
-            bss_b = self.lmd_b.loader.main_object.sections_map[".bss"].min_addr
-            acceptable_differences.add(bss_b - bss_a)
-            acceptable_differences.add((bss_b - block_b_base) - (bss_a - block_a_base))
+        #if ".bss" in self.lmd_a.loader.main_object.sections_map and \
+        #        ".bss" in self.lmd_b.loader.main_object.sections_map:
+        #    bss_a = self.lmd_a.loader.main_object.sections_map[".bss"].min_addr
+        #    bss_b = self.lmd_b.loader.main_object.sections_map[".bss"].min_addr
+        #    acceptable_differences.add(bss_b - bss_a)
+        #    acceptable_differences.add((bss_b - block_b_base) - (bss_a - block_a_base))
 
         return acceptable_differences
