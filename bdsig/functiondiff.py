@@ -177,6 +177,9 @@ def differing_constants(block_a, block_b):
         differences = compare_statement_dict(statement, statement_2)
         for d in differences:
             if d.type != DIFF_VALUE:
+                if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
+                    import ipdb;
+                    ipdb.set_trace()
                 raise UnmatchedStatementsException("Instruction has changed")
             else:
                 changes.append(ConstantChange(current_offset, d.value_a, d.value_b))
@@ -410,6 +413,9 @@ class FunctionDiff(object):
         try:
             diff_constants = FunctionDiff._block_diff_constants(block_a, block_b)
         except UnmatchedStatementsException:
+            if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
+                import ipdb;
+                ipdb.set_trace()
             return False
 
         if not check_constants:

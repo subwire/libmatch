@@ -196,6 +196,8 @@ class LibMatchDescriptor(object):
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
                                 for addr, sp in proj._sim_procedures.items()}
+
+        self.banned_addrs = set()
         self.normalized_functions = {}
         self.normalized_blocks = {}
         self.ordered_successors = {}
@@ -231,8 +233,7 @@ class LibMatchDescriptor(object):
 
         # Do this last because it is somewhat dangerous (must modify symbol owner object references)
         self.loader = CleLoaderHusk(proj.loader)
-
-        self.banned_addrs = set()
+        # aaaand cleanup
         for faddr in self.function_manager:
             f = self.function_manager.function(faddr)
             if f.is_plt or f.is_simprocedure \
@@ -246,11 +247,14 @@ class LibMatchDescriptor(object):
         self.viable_symbols = set()
         for sym in self.loader.main_object.symbols:
             if sym.is_function \
+                    and not sym.is_hidden \
                     and not sym.is_weak \
                     and sym.binding != "STB_LOCAL" \
                     and sym.rebased_addr not in self.banned_addrs:
                 self.viable_symbols.add(sym)
-
+        proj.loader.close()
+        del proj.loader
+        
     def is_trivial(self, proj, f):
         """
         Return True is a function is "trivial"
@@ -258,9 +262,10 @@ class LibMatchDescriptor(object):
         :param f:
         :return:
         """
+        # The function is one block.
         if len(list(f.block_addrs)) == 1:
             b = proj.factory.block(list(f.block_addrs)[0])
-            if len(b.instruction_addrs) == 1 and b.vex.jumpkind == 'Ijk_Ret':
+            if len(b.instruction_addrs) <= 2 and b.vex.jumpkind == 'Ijk_Ret':
                 return True
         return False
 
