@@ -3,9 +3,12 @@ import yaml
 import makeelf
 import argparse
 from bdsig.utils import collect_best_matches_for_library
+from bdsig.lmdb import LibMatchDatabase
+from bdsig.lmd import LibMatchDescriptor
 import logging
 import autoblob
 import angr
+import os
 
 log = logging.getLogger('unblob')
 
@@ -16,9 +19,9 @@ def parse_opts():
     parser.add_argument("--debug", action='store_true')
 
     modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("-U", dest='mode_normal', default=True, action='store_true', help='Unblobulate! (default)')
+    modes.add_argument("-U", dest='mode_normal', action='store_true', help='Unblobulate!')
     modes.add_argument("-X", dest='mode_extract', action='store_true', help='Extract')
-    modes.add_argument("-B", dest='mode_build', action='store_true', help="Build library signatures")
+    modes.add_argument("-B", dest='mode_build', action='store_true', help="Build library signatures (provide input directory and output LMDB filename)")
 
     input_opts = parser.add_argument_group("Input options")
     input_opts.add_argument('--base-address', type=int, help="Manually specify the base address of the binary")
@@ -29,7 +32,7 @@ def parse_opts():
     symbol_opts = parser.add_argument_group("Symbol Recovery Options")
     symbol_opts.add_argument("-S", "--disable-symbol-recovery", help="Enable symbol recovery", action='store_true')
     symbol_opts.add_argument('-F', "--fudge-factor", help="Lowest similarity score to consider a 'match' for symbol recovery")
-    symbol_opts.add_argument('-L', "--lmds", help="Directory of LMD files to process (required)")
+    symbol_opts.add_argument('-L', "--lmdb", help="LMDB file to use for symbol recovery")
     symbol_opts.add_argument('-1', "--first-order", help="Only use the first-order metric to gather symbols", action='store_true')
     symbol_opts.add_argument('-2', "--second-order", help="Only use the third-order metric to gather symbols",
                            action='store_true')
@@ -44,11 +47,8 @@ def parse_opts():
 
 
     if opts.mode_normal:
-        if not opts.disable_symbol_recovery and not opts.lmds:
+        if not opts.disable_symbol_recovery and not opts.lmdb:
             parser.error("To use symbol recovery, you must specify signatures to match with using -L (or disable symbol recovery)")
-    elif opts.mode_build:
-        if len(args) != 1:
-            parser.error("You must specify the directory of libraries to build signatures for")
     elif opts.mode_extract:
         parser.error("Not implemented yet")
     return opts
@@ -69,6 +69,7 @@ def quick_cortex_parser(infile):
         entry = struct.unpack('<I', f.read(4))[0]
         base = entry & 0xffff0000  # wow that's gross
         return base, entry
+
 
 def load_it(opts):
     try:
@@ -92,9 +93,9 @@ def load_it(opts):
 def make_yaml(project, symbol_map, opts):
     # Do it
     the_dict = {}
-    the_dict['architecture'] = project.arch.name
-    the_dict['base_address'] = project.loader.main_object.min_addr
-    the_dict['entry_point'] = project.entry
+    the_dict['architecture'] = opts.arch.qemu_name
+    the_dict['base_address'] = opts.base_address
+    the_dict['entry_point'] = opts.entry_point
     the_dict['symbols'] = symbol_map
     with open(opts.outfile, 'w') as f:
         yaml.dump(the_dict, stream=f)
@@ -111,7 +112,12 @@ def do_normal(opts):
             opts.base_address, opts.entry_point = quick_cortex_parser(opts.infile)
     project = load_it(opts)
     if not project:
+        log.critical("Load failed!")
         sys.exit(1)
+    opts.arch = project.arch
+    opts.base_address = project.loader.main_object.min_addr
+    opts.entry_point = project.entry
+
     log.info("################")
     log.info("Detected architecture: %s" % project.arch.name)
     log.info("Detected base address: %#08x" % project.loader.main_object.min_addr)
@@ -120,8 +126,12 @@ def do_normal(opts):
     # Now do symbol recovery
     symbol_map = None
     if not opts.disable_symbol_recovery:
-        lib_dir = opts.lmds
-        symbol_map = collect_best_matches_for_library(project, lib_dir)
+        log.info("Loading LMDB from %s" % opts.lmdb)
+        lmdb = LibMatchDatabase.load_path(opts.lmdb)
+        log.info("Processing target binary")
+        lmd = LibMatchDescriptor(project)
+        log.info("Beginning symbol recovery")
+        symbol_map = lmdb.match(lmd)
 
     # Create the output
     if opts.elf:
@@ -129,8 +139,30 @@ def do_normal(opts):
     elif opts.yaml:
         make_yaml(project, symbol_map, opts)
 
+
+def do_build(opts):
+    libs_dir = opts.infile
+    if not os.path.isdir(libs_dir):
+        print("%s is not a directory" % libs_dir)
+        sys.exit(1)
+    lmdb = LibMatchDatabase.build(libs_dir)
+    lmdb.dump_path(opts.outfile)
+
+def stfu(thing):
+    l = logging.getLogger(thing)
+    l.setLevel(logging.CRITICAL)
+
 if __name__ == '__main__':
     logging.basicConfig()
+    log.setLevel("INFO")
+    stfu('cle.elf')
+    stfu('cle.loader')
+    stfu('angr.analyses.cfg.cfg_fast')
+    stfu('angr.state_plugins.symbolic_memory')
+    stfu('angr.engines.successors')
+
     opts = parse_opts()
     if opts.mode_normal:
         do_normal(opts)
+    elif opts.mode_build:
+        do_build(opts)
