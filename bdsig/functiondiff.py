@@ -680,11 +680,16 @@ class FunctionDiff(object):
         # keep a set of the acceptable differences in constants between the two blocks
         acceptable_differences = set()
         acceptable_differences.add(0)
+        if not block_a.instruction_addrs or not block_b.instruction_addrs:
+            return []
         try:
             block_a_base = block_a.instruction_addrs[0]
         except:
             import ipdb; ipdb.set_trace()
-        block_b_base = block_b.instruction_addrs[0]
+        try:
+            block_b_base = block_b.instruction_addrs[0]
+        except:
+            import ipdb; ipdb.set_trace()
         acceptable_differences.add(block_b_base - block_a_base)
 
         # get matching successors
