@@ -131,7 +131,7 @@ def do_normal(opts):
         log.info("Processing target binary")
         lmd = LibMatchDescriptor(project)
         log.info("Beginning symbol recovery")
-        symbol_map = lmdb.match(lmd)
+        symbol_map = lmdb.match(lmd, score=opts.scoring)
 
     # Create the output
     if opts.elf:

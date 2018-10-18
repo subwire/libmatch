@@ -7,6 +7,7 @@ from collections import defaultdict
 from .lmd import LibMatchDescriptor
 from .utils import PROJECT_KWARGS
 from .libmatch import LibMatch
+from .utils import score_matches
 
 l = logging.getLogger("bdsig.lmdb")
 l.setLevel("DEBUG")
@@ -51,7 +52,7 @@ class LibMatchDatabase(object):
                 final_matches[f_addr] = sym_name
         return final_matches
 
-    def match(self, lmd_path):
+    def match(self, lmd_path, score=False):
         """
         Scan the database and try to match all libraries with the target.
 
@@ -72,6 +73,9 @@ class LibMatchDatabase(object):
         # TODO: This is where we put multi-library heuristics!
 
         candidates = self._smoosh(candidates)
+        if score:
+            score_matches(lmd_path, candidates)
+
         return self._postprocess_matches(candidates)
 
 
