@@ -67,8 +67,6 @@ class LibMatch(object):
                 for maddr in func_matches:
 
                     fd = self._second_order_heuristic(self.binary_lmd, lmd, maddr, faddr)
-                    #if fd.function_a.name == "i2c_write":
-                    #    import ipdb; ipdb.set_trace()
                     if fd.probably_identical:
                         self._second_order_matches[lib_name][lmd][faddr].append((maddr, fd))
 
@@ -86,10 +84,7 @@ class LibMatch(object):
                             if len(matches[target_addr]) > 0:
                                 # A collision! But is it a real one?
                                 # Did we match better?
-                                try:
-                                    prev_lib, prev_lmd, prev_match_info = matches[target_addr][0]
-                                except:
-                                    import ipdb; ipdb.set_trace()
+                                prev_lib, prev_lmd, prev_match_info = matches[target_addr][0]
                                 if match_info.similarity_score > prev_match_info.similarity_score:
                                     # Better match
                                     matches[target_addr] = [(lib_name, obj_lmd, match_info)]
@@ -107,15 +102,33 @@ class LibMatch(object):
             if matches:
                 self._narrow_third_order(f_addr, matches)
 
+
+    def squish(self, func):
+        """
+        When resolving collisions, are all the collisions duplicates? If so, we probably don't care, and will handle it in post later
+        (but we save the dupes for stats purposes)
+
+        :return:
+        """
+        matches = self._candidate_matches[func]
+        the_name = None
+        for lib, lmd, fd in matches:
+            if the_name is None:
+                the_name = fd.function_b.name
+            elif the_name == fd.function_b.name:
+                continue
+            else:
+                return
+        self._candidate_matches[func] = [matches[0]]
+
     def _narrow_third_order(self, f_addr, matches):
+        if f_addr == 0x0800080b:
+            import ipdb; ipdb.set_trace()
         if len(matches) == 1:
             # Perfect match! cannot refine
             return
         # Get the target for each candidate match
-        try:
-            target_func = list(matches)[0][2].function_a
-        except:
-            import ipdb; ipdb.set_trace()
+        target_func = list(matches)[0][2].function_a
         target_callees = []
         for from_block, callees in target_func.call_sites.items():
             for callee in callees:
@@ -138,6 +151,7 @@ class LibMatch(object):
                             return
                         l.error("Recursively resolving %#08x" % callee)
                         self._narrow_third_order(callee, callee_matches)
+                        self.squish(callee)
                         if len(self._candidate_matches[callee]) > 1:
                             l.error("Failed to narrow down call to %#08x" % callee)
                             self.ambiguous_funcs.append(f_addr)
@@ -154,6 +168,8 @@ class LibMatch(object):
         l.debug("Resolving Function %#08x" % f_addr)
         for lib_name, match_lmd, match_diff in matches:
             match_name = match_diff.function_b.name
+            if match_name == 'mbed_sdk_init':
+                import ipdb; ipdb.set_trace()
             # Get the addresses of each function that library calls.
             lib_callees = []
             for lol in match_diff.function_b.call_sites.values():
