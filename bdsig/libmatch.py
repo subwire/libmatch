@@ -112,6 +112,8 @@ class LibMatch(object):
         """
         matches = self._candidate_matches[func]
         the_name = None
+        if not matches:
+            return
         for lib, lmd, fd in matches:
             if the_name is None:
                 the_name = fd.function_b.name
@@ -121,11 +123,15 @@ class LibMatch(object):
                 return
         self._candidate_matches[func] = [matches[0]]
 
+    recursion_list = []
     def _narrow_third_order(self, f_addr, matches):
-        if f_addr == 0x0800080b:
-            import ipdb; ipdb.set_trace()
+        if f_addr in self.recursion_list:
+            l.warning("Oof, recursion to %#08x!" % f_addr)
+            return
+        self.recursion_list.append(f_addr)
         if len(matches) == 1:
             # Perfect match! cannot refine
+            self.recursion_list.remove(f_addr)
             return
         # Get the target for each candidate match
         target_func = list(matches)[0][2].function_a
@@ -142,19 +148,21 @@ class LibMatch(object):
                 elif callee not in self._candidate_matches or len(self._candidate_matches[callee]) == 0:
                     l.error("Cannot disambiguate function at %#08x, unmatched call to %#08x" % (f_addr, callee))
                     self.ambiguous_funcs.append(f_addr)
+                    self.recursion_list.remove(f_addr)
                     return  # We're fucked
                 else:
                     callee_matches = self._candidate_matches[callee]
                     if len(callee_matches) > 1:
                         if callee == f_addr:
                             l.warning("Recursion is bad!")
-                            return
+                            continue
                         l.error("Recursively resolving %#08x" % callee)
                         self._narrow_third_order(callee, callee_matches)
                         self.squish(callee)
                         if len(self._candidate_matches[callee]) > 1:
                             l.error("Failed to narrow down call to %#08x" % callee)
                             self.ambiguous_funcs.append(f_addr)
+                            self.recursion_list.remove(f_addr)
                             return
                     m_lib, m_lmd, m_fd = callee_matches[0]
                     callee_name = m_lmd.symbol_for_addr(m_fd.function_b.addr).name
@@ -168,8 +176,6 @@ class LibMatch(object):
         l.debug("Resolving Function %#08x" % f_addr)
         for lib_name, match_lmd, match_diff in matches:
             match_name = match_diff.function_b.name
-            if match_name == 'mbed_sdk_init':
-                import ipdb; ipdb.set_trace()
             # Get the addresses of each function that library calls.
             lib_callees = []
             for lol in match_diff.function_b.call_sites.values():
@@ -188,7 +194,7 @@ class LibMatch(object):
             else:
                 self._candidate_matches[f_addr].append((lib_name, match_lmd, match_diff))
                 l.error("Resolved call to %#08x to %s via callgraph" % (f_addr, match_name))
-                
+        self.recursion_list.remove(f_addr)
 
     def _compute(self):
         """
