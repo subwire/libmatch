@@ -103,6 +103,7 @@ class LibMatch(object):
                 self._narrow_third_order(f_addr, matches)
 
     def _compute_fourth_order(self):
+        self.recursion_list = []
         good_hits = []
         for f_addr, matches in self._candidate_matches.items():
             if len(matches) == 1:
@@ -235,10 +236,12 @@ class LibMatch(object):
             return
         self.recursion_list.append(f_addr)
         if len(matches) != 1:
+            self.recursion_list.remove(f_addr)
             return
         m_lib, m_lmd, m_fd = matches[0]
         if isinstance(m_fd, str):
             # We've already been here
+            self.recursion_list.remove(f_addr)
             return
         target_func = m_fd.function_a
         lib_func = m_fd.function_b
@@ -275,6 +278,12 @@ class LibMatch(object):
                             l.info("Resolving %#08x to %s via call from %#08x(%s)" % (targ_callee, guessed_name, target_func.addr, lib_func.name))
                             new_matches.append((c_lib, c_lmd, c_fd,))
                     self._candidate_matches[targ_callee] = new_matches
+                    self.squish(targ_callee)
+                    if len(self._candidate_matches[targ_callee]) == 1:
+                        # Recurse, see if that helps any.
+                        l.info("Recursively resolving %#08x" % targ_callee)
+                        self._narrow_fourth_order(targ_callee, self._candidate_matches[targ_callee])
+        self.recursion_list.remove(f_addr)
 
     def _compute(self):
         """
