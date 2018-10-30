@@ -23,7 +23,7 @@ class LibMatchDatabase(object):
     """
     def __init__(self, lib_lmds):
         self.lib_lmds = lib_lmds
-
+        self._build_sym_list(lib_lmds)
         self.symbols = defaultdict(list) # Mapping of string names to all the libraries and objects that contain them.
                                                       # Used primarily for scoring
 
@@ -47,8 +47,11 @@ class LibMatchDatabase(object):
             if len(match_infos) > 1:
                     continue
             for lib, lmd, match in match_infos:
-                obj_func_addr = match.function_b.addr
-                sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
+                if isinstance(match, str):
+                    sym_name = match
+                else:
+                    obj_func_addr = match.function_b.addr
+                    sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
                 final_matches[f_addr] = sym_name
         return final_matches
 
@@ -74,7 +77,7 @@ class LibMatchDatabase(object):
 
         candidates = self._smoosh(candidates)
         if score:
-            score_matches(lmd_path, candidates)
+            score_matches(lmd_path, candidates, self)
 
         return self._postprocess_matches(candidates)
 
@@ -122,6 +125,21 @@ class LibMatchDatabase(object):
         lmdb.dump_path(os.path.join(directory, filename))
         l.info("Done")
         return lmdb
+
+    def _build_sym_list(self, lmds):
+        """
+        Build the total list of symbols this database contains.
+        If its not in this list, we are for sure not going to match well with it
+        (used for scoring)
+        :param lmds:
+        :return:
+        """
+        syms = set()
+        for _, lmd_list in lmds.items():
+            for lmd in lmd_list:
+                names = {x.name for x in lmd.viable_symbols}
+                syms.update(names)
+        self.symbol_names = syms
 
     @staticmethod
     def load_path(p):

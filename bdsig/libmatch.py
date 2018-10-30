@@ -102,6 +102,13 @@ class LibMatch(object):
             if matches:
                 self._narrow_third_order(f_addr, matches)
 
+    def _compute_fourth_order(self):
+        good_hits = []
+        for f_addr, matches in self._candidate_matches.items():
+            if len(matches) == 1:
+                good_hits.append((f_addr, matches,))
+        for f_addr, matches in good_hits:
+            self._narrow_fourth_order(f_addr, matches)
 
     def squish(self, func):
         """
@@ -124,7 +131,8 @@ class LibMatch(object):
         self._candidate_matches[func] = [matches[0]]
 
     recursion_list = []
-    def _narrow_third_order(self, f_addr, matches):
+
+    def _narrow_third_order(self, f_addr, matches, exact_narrowing=False):
         if f_addr in self.recursion_list:
             l.warning("Oof, recursion to %#08x!" % f_addr)
             return
@@ -133,6 +141,7 @@ class LibMatch(object):
             # Perfect match! cannot refine
             self.recursion_list.remove(f_addr)
             return
+        l.info("Analyzing function %#08x" % f_addr)
         # Get the target for each candidate match
         target_func = list(matches)[0][2].function_a
         target_callees = []
@@ -141,10 +150,10 @@ class LibMatch(object):
                 if not self.binary_lmd.loader.main_object.contains_addr(callee):
                     # A jumpout! Fuck.
                     callee_name = "UnresolvableTarget"
-                    target_callees.append((callee, callee_name))
+                    target_callees.append({(callee, callee_name,)})
                 elif callee in self.binary_lmd.banned_addrs:
                     callee_name = "Ignored"
-                    target_callees.append((callee, callee_name))
+                    target_callees.append({(callee, callee_name,)})
                 elif callee not in self._candidate_matches or len(self._candidate_matches[callee]) == 0:
                     l.error("Cannot disambiguate function at %#08x, unmatched call to %#08x" % (f_addr, callee))
                     self.ambiguous_funcs.append(f_addr)
@@ -159,14 +168,18 @@ class LibMatch(object):
                         l.error("Recursively resolving %#08x" % callee)
                         self._narrow_third_order(callee, callee_matches)
                         self.squish(callee)
-                        if len(self._candidate_matches[callee]) > 1:
+
+                        if exact_narrowing and len(self._candidate_matches[callee]) > 1:
                             l.error("Failed to narrow down call to %#08x" % callee)
                             self.ambiguous_funcs.append(f_addr)
                             self.recursion_list.remove(f_addr)
                             return
-                    m_lib, m_lmd, m_fd = callee_matches[0]
-                    callee_name = m_lmd.symbol_for_addr(m_fd.function_b.addr).name
-                    target_callees.append((callee, callee_name))
+                    possible_callees = set()
+                    for cm in callee_matches:
+                        m_lib, m_lmd, m_fd = cm
+                        callee_name = m_lmd.symbol_for_addr(m_fd.function_b.addr).name
+                        possible_callees.add((callee, callee_name,))
+                    target_callees.append(possible_callees)
         if not target_callees:
             l.error("No calls in function %#08x, cannot disambiguate" % f_addr)
             self.ambiguous_funcs.append(f_addr)
@@ -181,20 +194,87 @@ class LibMatch(object):
             for lol in match_diff.function_b.call_sites.values():
                 for lmao in lol:
                     lib_callees.append(lmao)
-            for targ_callee, lib_callee in zip(target_callees, lib_callees):
-                targ_callee_addr, targ_callee_name = targ_callee
+            # Here, we try to compare the functions we matched via direct block comparison with libraries, based on what we think
+            # the target actually called.
+            # However, we may not be able to accurately resolve the target's callees, so we check that, for each candidate
+            # library function, its exact callees are in the set of potential callees in the target.
+            # If not, we rule it out.
+            for possible_targ_callees, lib_callee in zip(target_callees, lib_callees):
+                targ_callee_addr = list(possible_targ_callees)[0][0]
                 lib_callee_name = match_lmd.symbol_for_addr(lib_callee).name
-                if targ_callee_name == "Ignored":
-                    l.debug("Ignoring unresolvable call to %#08x" % targ_callee_addr)
-                    continue
-                if targ_callee_name != lib_callee_name:
-                    l.debug("\tRuling out %s due to mismatched call (%s != %s)" % (match_name, targ_callee_name, lib_callee_name))
+                for targ_callee in possible_targ_callees:
+                    targ_callee_addr, targ_callee_name = targ_callee
+                    if targ_callee_name == "Ignored":
+                        l.debug("Ignoring unresolvable call to %#08x" % targ_callee_addr)
+                        break
+                    if targ_callee_name == lib_callee_name:
+                        l.debug("\t\tMatched call to %s" % targ_callee_name)
+                        break
+                else:
+                    l.debug("\tRuling out %s due to mismatched call to %#08x" % (lib_callee_name, targ_callee_addr))
                     break
-                l.debug("\t\tMatched call to %s" % targ_callee_name)
             else:
                 self._candidate_matches[f_addr].append((lib_name, match_lmd, match_diff))
                 l.error("Resolved call to %#08x to %s via callgraph" % (f_addr, match_name))
         self.recursion_list.remove(f_addr)
+
+    def _narrow_fourth_order(self, f_addr, matches):
+        """
+        By now, we've probably matched a bunch of functions.  But we can't get them all.
+        This will use those functions we could match to find the ones we can't.
+        In contrast to the third phase, which uses callees to find callers, this does the opposite.
+        For each function we can precisely match, collect the set of callees, and assign names to them based on the
+        symbols in the source library.
+
+        :param f_addr:
+        :param matches:
+        :return:
+        """
+        if f_addr in self.recursion_list:
+            l.warning("Oof, recursion to %#08x!" % f_addr)
+            return
+        self.recursion_list.append(f_addr)
+        if len(matches) != 1:
+            return
+        m_lib, m_lmd, m_fd = matches[0]
+        if isinstance(m_fd, str):
+            # We've already been here
+            return
+        target_func = m_fd.function_a
+        lib_func = m_fd.function_b
+        for (targ_block, targ_callees), (lib_block, lib_callees) in zip(target_func.call_sites.items(), lib_func.call_sites.items()):
+            for targ_callee, lib_callee in zip(targ_callees, lib_callees):
+                if not self.binary_lmd.loader.main_object.contains_addr(targ_callee):
+                    # A jumpout! Fuck.
+                    continue
+                elif targ_callee in self.binary_lmd.banned_addrs:
+                    # Junk.
+                    continue
+                elif targ_callee not in self._candidate_matches or len(self._candidate_matches[targ_callee]) == 0:
+                    # Take a wild guess based on context
+                    # Assuming the current match is correct, figure out what it would call in the original
+                    # library and make that the name to match.
+                    guessed_sym = m_lmd.symbol_for_addr(lib_callee)
+                    if guessed_sym is None:
+                        l.info("No findable name for call to %#08x from %#08x(%s)"% (targ_callee, target_func.addr, lib_func.name))
+                    else:
+                        guessed_name = guessed_sym.name
+                        l.info("Guessing name of %#08x is %s due to call from %#08x(%s)" % (targ_callee, guessed_name, target_func.addr, lib_func.name))
+                        self._candidate_matches[targ_callee] = [(m_lib, m_lmd, guessed_name)]
+                elif len(self._candidate_matches[targ_callee]) == 1:
+                    # Nothing to do
+                    continue
+                else:
+                    # We have a collision.  Resolve it by picking the one with the matching
+                    # name based on the lib's symbols
+                    guessed_name = m_lmd.symbol_for_addr(lib_callee).name
+                    new_matches = []
+                    for match in self._candidate_matches[targ_callee]:
+                        c_lib, c_lmd, c_fd = match
+                        if c_fd.function_b.name == guessed_name:
+                            l.info("Resolving %#08x to %s via call from %#08x(%s)" % (targ_callee, guessed_name, target_func.addr, lib_func.name))
+                            new_matches.append((c_lib, c_lmd, c_fd,))
+                    self._candidate_matches[targ_callee] = new_matches
 
     def _compute(self):
         """
@@ -207,3 +287,4 @@ class LibMatch(object):
         for lib in self.lmdb.lib_lmds:
             self._compute_second_order_matches(lib)
         self._compute_third_order()
+        self._compute_fourth_order()
