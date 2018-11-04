@@ -123,7 +123,7 @@ def score_matches(target_lmd_name, matches, lmdb):
                         print(green("%#08x => %s:%s(%f) [Correct!] in %s" % (f_addr, lib, sym_name, similarity_score, filename)))
                         precise_matches += 1
                     else:
-                        print(red("%#08x => %s:%s(%f) [WRONG, %s] in %s" % (f_addr, lib, sym_name, match.similarity_score, sym.name, lmd.filename)))
+                        print(red("%#08x => %s:%s(%f) [WRONG, %s] in %s" % (f_addr, lib, sym_name, similarity_score, sym.name, lmd.filename)))
                         incorrect_matches += 1
             elif len(match_infos) == 0:
                 missing += 1
