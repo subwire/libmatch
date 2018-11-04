@@ -13,6 +13,8 @@ setup(
     version='0.0.1.1',
     packages=packages,
     install_requires=[
-        'networkx>=2'
+        'networkx>=2',
+        'PyYAML',
+        'makeelf'
     ]
 )
