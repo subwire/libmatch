@@ -79,8 +79,9 @@ class LibMatchDatabase(object):
         if score:
             score_matches(lmd_path, candidates, self)
 
-        return self._postprocess_matches(candidates)
-
+        out = self._postprocess_matches(candidates)
+        l.warning("Matched %d symbols" % len(list(out.keys())))
+        return out
 
     # Creation and Serialization
     @staticmethod
@@ -124,7 +125,6 @@ class LibMatchDatabase(object):
         filename = os.path.basename(os.path.abspath(root_dir)) + ".lmdb"
         lmdb.dump_path(os.path.join(directory, filename))
         l.info("Done")
-        return lmdb
 
     def _build_sym_list(self, lmds):
         """
