@@ -192,7 +192,11 @@ class LibMatchDescriptor(object):
     Serializes easily into a (relatively) small blob.
     """
     def __init__(self, proj, banned_names=("$d", "$t")):
-        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, resolve_indirect_jumps=True, normalize=True)
+        self.cfg = proj.analyses.CFGFast(force_complete_scan=False, 
+                resolve_indirect_jumps=True, 
+                normalize=True,
+                collect_data_references=True,
+                detect_tail_calls=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
                                 for addr, sp in proj._sim_procedures.items()}
