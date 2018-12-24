@@ -2,7 +2,8 @@ import angr
 from angr.analyses.cfg import CFGFast
 from networkx.classes import DiGraph
 from angr.knowledge_plugins.functions import Function
-
+import functionsimsearch
+from angr.analyses import Analysis, register_analysis
 
 def tg_to_fss(f: Function, cfg: CFGFast):
     """
@@ -12,6 +13,7 @@ def tg_to_fss(f: Function, cfg: CFGFast):
     :param cfg:
     :return:
     """
+    fgwi = functionsimsearch.FlowgraphWithInstructions()
     fg = f.transition_graph
     disasm = cfg.project.analyses.Disassembly(f)
     fss = dict()
@@ -21,19 +23,21 @@ def tg_to_fss(f: Function, cfg: CFGFast):
     # Convert edges
     for edg in fg.edges:
         src, dst = edg
-        fss_edge = {'source': src.addr, 'destination': dst.addr}
-        fss['edges'].append(fss_edge)
+        fgwi.add_edge(src.addr, dst.addr)
 
     for n in fg.nodes:
-        fss_node = {'address': n.addr}
-        fss_node['instructions'] = list()
+        fgwi.add_node(n.addr)
+        inss = list()
         for iaddr in disasm.block_to_insn_addrs[n.addr]:
             i = disasm.raw_result_map['instructions'][iaddr]
-            fss_ins = dict()
-            fss_ins['mnemonic'] = i.mnemonic.opcode_string
-            fss_ins['operands'] = [o.render().strip("{}\[\]") for o in i.operands]
-            fss_node['instructions'].append(fss_ins)
-        fss['nodes'].append(fss_node)
-    return fss
+            mnem = i.mnemonic.opcode_string
+            ops = {o.render().strip("{}\[\]") for o in i.operands}
+            inss.append((mnem, ops))
+        inss = {i for i in inss}
+        fgwi.add_instructions(n.addr, inss)
+    return fgwi
 
 
+
+class SimSimSearch(Analysis)
+    pass
