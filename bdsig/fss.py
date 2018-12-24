@@ -5,18 +5,26 @@ from angr.knowledge_plugins.functions import Function
 
 
 def tg_to_fss(f: Function, cfg: CFGFast):
+    """
+    Convert a function to FunctionSimSearch's
+    CFG format.
+    :param f:
+    :param cfg:
+    :return:
+    """
     fg = f.transition_graph
     disasm = cfg.project.analyses.Disassembly(f)
     fss = dict()
     fss['edges'] = list()
     fss['nodes'] = list()
+
     # Convert edges
     for edg in fg.edges:
         src, dst = edg
         fss_edge = {'source': src.addr, 'destination': dst.addr}
         fss['edges'].append(fss_edge)
 
-    for n in tg.nodes:
+    for n in fg.nodes:
         fss_node = {'address': n.addr}
         fss_node['instructions'] = list()
         for iaddr in disasm.block_to_insn_addrs[n.addr]:
