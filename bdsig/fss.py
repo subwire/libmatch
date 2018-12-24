@@ -31,7 +31,7 @@ def tg_to_fss(f: Function, cfg: CFGFast):
             i = disasm.raw_result_map['instructions'][iaddr]
             fss_ins = dict()
             fss_ins['mnemonic'] = i.mnemonic.opcode_string
-            fss_ins['operands'] = [o.render() for o in i.operands]
+            fss_ins['operands'] = [o.render().strip("{}\[\]") for o in i.operands]
             fss_node['instructions'].append(fss_ins)
         fss['nodes'].append(fss_node)
     return fss
