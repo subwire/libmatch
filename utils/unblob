@@ -145,8 +145,7 @@ def do_build(opts):
     if not os.path.isdir(libs_dir):
         print("%s is not a directory" % libs_dir)
         sys.exit(1)
-    lmdb = LibMatchDatabase.build(libs_dir)
-    lmdb.dump_path(opts.outfile)
+    LibMatchDatabase.build(libs_dir)
 
 def stfu(thing):
     l = logging.getLogger(thing)

@@ -271,7 +271,7 @@ class FunctionDiff(object):
         if len(self._unmatched_blocks_from_a | self._unmatched_blocks_from_b) > 0:
             return False
         for (a, b) in self._block_matches:
-            if not self.blocks_probably_identical(a, b):
+            if not self.blocks_probably_identical(a, b, check_constants=True):
                 return False
         return True
 
@@ -392,6 +392,8 @@ class FunctionDiff(object):
         :param check_constants: Whether or not to require matching constants in blocks.
         :returns:               Whether or not the blocks appear to be identical.
         """
+        if block_a.addr == 0x71d and self.function_b.name.startswith("EIC"):
+            import ipdb; ipdb.set_trace()
         # handle sim procedure blocks
         if self.lmd_a.is_hooked(block_a) and self.lmd_b.is_hooked(block_b):
             return self.lmd_a._sim_procedures[block_a] == self.lmd_b._sim_procedures[block_b]

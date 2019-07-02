@@ -41,18 +41,37 @@ class LibMatchDatabase(object):
                 candidates[f_addr] = [stuff[0]]
         return candidates
 
-    def _postprocess_matches(self, results):
+    def _postprocess_matches(self, target_lmd, results):
+        """
+        Clean up the matches for the user.
+        This encodes the behavior "we consider it a match if we 
+        match with exactly one name"
+        """
         final_matches = {}
+        collisions = 0
+        junk = 0
+        guesses = 0
         for f_addr, match_infos in results.items():
             if len(match_infos) > 1:
-                    continue
+                collisions += 1    
+                continue
+            if f_addr not in target_lmd.viable_functions:
+                # we put a name on it, but it's a stub!
+                # What. Ever.
+                junk += 1
+                continue
             for lib, lmd, match in match_infos:
                 if isinstance(match, str):
                     sym_name = match
+                    guesses += 1
                 else:
                     obj_func_addr = match.function_b.addr
                     sym_name = lmd.function_manager.get_by_addr(obj_func_addr).name
                 final_matches[f_addr] = sym_name
+        l.warning("Detected %d collisions" % collisions)
+        l.warning("Ignored %d junk function matches" % junk)
+        l.warning("Made %d guesses", guesses)
+        l.warning("Matched %d symbols" % len(list(final_matches.keys())))
         return final_matches
 
     def match(self, lmd_path, score=False):
@@ -70,17 +89,22 @@ class LibMatchDatabase(object):
         try:
             self.lm = LibMatch(lmd, self)
             candidates = self.lm._candidate_matches
+            plain_candidates = self.lm._plain_matches
         except Exception as e:
             l.exception("Error computing matches")
             raise
         # TODO: This is where we put multi-library heuristics!
 
         candidates = self._smoosh(candidates)
+        plain_candidates = self._smoosh(plain_candidates)
         if score:
+            print("############### UNREFINED MATCHES ###############")
+            score_matches(lmd_path, plain_candidates, self)
+            input()
+            print("############### FINAL MATCHES ###############")
             score_matches(lmd_path, candidates, self)
 
-        out = self._postprocess_matches(candidates)
-        l.warning("Matched %d symbols" % len(list(out.keys())))
+        out = self._postprocess_matches(lmd, candidates)
         return out
 
     # Creation and Serialization
@@ -90,7 +114,7 @@ class LibMatchDatabase(object):
         for dirName, subdirList, fileList in os.walk(lib_dir):
             l.info('Found directory: %s' % dirName)
             for fname in fileList:
-                if fname.endswith(".o"):
+                if fname.endswith(".o") or fname.endswith(".obj"):
                     fullfname = os.path.join(dirName, fname)
                     l.info("Making signature for " + fullfname)
                     try:

@@ -269,8 +269,16 @@ class LibMatchDescriptor(object):
         # The function is one block.
         if len(list(f.block_addrs)) == 1:
             b = proj.factory.block(list(f.block_addrs)[0])
-            if len(b.instruction_addrs) <= 2 and b.vex.jumpkind == 'Ijk_Ret':
+            if len(b.instruction_addrs) <= 2:# and b.vex.jumpkind == 'Ijk_Ret':
+                # mov r0, #0
+                # bx lr
+                #.... and similar
                 return True
+            #if len(b.instruction_addrs) == 1:
+            #    # One instruction must be either a jump or a ret.
+            #    # Or.... uh.. mangled garbage functions i guess
+            #    # Either way, it can't do anything useful.
+            #g    return True
         return False
 
 
@@ -291,7 +299,14 @@ class LibMatchDescriptor(object):
                 continue
             normalized_function = self.normalized_functions[function_addr]
             number_of_basic_blocks = len(normalized_function.graph.nodes())
-            number_of_edges = len(normalized_function.graph.edges())
+            #number_of_edges = len(normalized_function.graph.edges())
+            number_of_edges = 0
+            for u, v in normalized_function.graph.edges():
+                d = normalized_function.graph.get_edge_data(u, v)
+                if 'type' in d and d['type'] == 'fake_return':
+                    continue
+                number_of_edges += 1
+
             if function_addr in all_funcs:
                 number_of_subfunction_calls = len(list(self.cfg.kb.callgraph.successors(function_addr)))
             else:

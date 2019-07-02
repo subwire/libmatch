@@ -90,6 +90,7 @@ def score_matches(target_lmd_name, matches, lmdb):
     imprecise_matches = 0
     incorrect_matches = 0
     missing = 0
+    guesses = 0
     targ_sym_names = {x.name for x in target_lmd.viable_symbols}
     scorable_syms = targ_sym_names.intersection(lmdb.symbol_names)
     total_syms = len(scorable_syms)
@@ -97,8 +98,22 @@ def score_matches(target_lmd_name, matches, lmdb):
     addrs_to_names = defaultdict(list)
     for sym in target_lmd.viable_symbols:
         addrs_to_names[sym.rebased_addr].append(sym.name)
+
     for sym in target_lmd.viable_symbols:
         if sym.name not in scorable_syms:
+            # Maybe it's some app code we guessed
+            f_addr = sym.rebased_addr
+            if f_addr in matches:
+                match_infos = matches[f_addr]
+                if len(match_infos) == 1:
+                    for lib, lmd, match in match_infos:
+                        if isinstance(match, str):
+                            # we just have the name
+                            sym_name = match
+                            guesses += 1
+                            print(yellow("%#08x => %s (Guessed)" % (f_addr, sym_name)))
+                        else:
+                            ignored += 1
             continue
         f_addr = sym.rebased_addr
         if f_addr in target_lmd.banned_addrs:
@@ -114,6 +129,7 @@ def score_matches(target_lmd_name, matches, lmdb):
                         sym_name = match
                         similarity_score = 0.0
                         filename = "(Guessed via context)"
+                        guesses += 1
                     else:
                         similarity_score = match.similarity_score
                         obj_func_addr = match.function_b.addr
@@ -141,11 +157,12 @@ def score_matches(target_lmd_name, matches, lmdb):
         else:
             missing += 1
             print(red("%#08x => %s(UNMATCHED)" % (f_addr, sym.name)))
-
     print("Matched symbols: %d" % precise_matches)
     print("Missing symbols: %d" % missing)
     print("Incorrect symbols: %d" % incorrect_matches)
     print("Imprecise matches: %d" % imprecise_matches)
+    print("Guesses: %d" % guesses)
+    print("Ignored: %d" % ignored)
     print("Total symbols: %d " % total_syms)
     print("Hit rate: %f" % (precise_matches / total_syms))
     print("Error rate: %f" % (incorrect_matches / total_syms))

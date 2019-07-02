@@ -31,13 +31,13 @@ def tg_to_fss(f: Function, cfg: CFGFast):
         for iaddr in disasm.block_to_insn_addrs[n.addr]:
             i = disasm.raw_result_map['instructions'][iaddr]
             mnem = i.mnemonic.opcode_string
-            ops = {o.render().strip("{}\[\]") for o in i.operands}
+            ops = tuple([o.render()[0].strip("{}\[\]") for o in i.operands])
             inss.append((mnem, ops))
-        inss = {i for i in inss}
+        inss = tuple(inss)
         fgwi.add_instructions(n.addr, inss)
     return fgwi
 
 
 
-class SimSimSearch(Analysis)
+class SimSimSearch(Analysis):
     pass
