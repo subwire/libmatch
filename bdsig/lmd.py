@@ -79,8 +79,35 @@ class NormalizedFunction(object):
                 except (SimMemoryError, SimEngineError):
                     continue
 
-                # merge if it ends with a single call, and the successor has only one predecessor and succ is after
+                """
                 successors = list(self.graph.successors(node))
+                if bl.vex.jumpkind == 'Ijk_Call' and len(successors) == 0:
+                    # Calling a noreturn.  Try to make an edge around it.
+                    # Is this in the middle of a function?
+                    if (bl.addr + bl.size) < (function.addr + function.size):
+                        newblock = None
+                        newblock_addr = bl.addr + bl.size
+                        newblock_size = None
+                        if newblock_addr not in function.graph.nodes:
+                            # Find teh size of the block.
+                            for a in sorted(list(function.block_addrs)):
+                                if a > newblock_addr:
+                                    newblock_size = a - newblock_addr
+                                    break
+
+                            try:
+                                l.debug("Lifting noreturn tail at %#08x size %d" % (newblock_addr, newblock_size))
+                                newblock = project.factory.block(newblock_addr, opt_level=-1, size=newblock_size)
+                            except (SimMemoryError, SimEngineError):
+                                pass
+                            if newblock:
+                                newnode = newblock.codenode
+                                self.graph.add_node(newnode)
+                                self.graph.add_edge(node, newnode)
+                
+                """
+                successors = list(self.graph.successors(node))
+                # merge if it ends with a single call, and the successor has only one predecessor and succ is after
                 if bl.vex.jumpkind == "Ijk_Call" and len(successors) == 1 and \
                         len(list(self.graph.predecessors(successors[0]))) == 1 and successors[0].addr > node.addr:
                     # add edges to the successors of its successor, and delete the original successors
@@ -117,7 +144,8 @@ class NormalizedFunction(object):
                         call_targets.append(self.orig_function.get_call_target(block.addr))
             if self.orig_function.endpoints_with_type['transition']:
                 for tt in self.orig_function.endpoints_with_type['transition']:
-                    call_targets.append(tt.successors()[0].addr)
+                    if tt.addr == n.addr:
+                        call_targets.append(tt.successors()[0].addr)
             if len(call_targets) > 0:
                 self.call_sites[n] = call_targets
 
@@ -195,7 +223,7 @@ class LibMatchDescriptor(object):
         self.cfg = proj.analyses.CFGFast(force_complete_scan=False, 
                 resolve_indirect_jumps=True, 
                 normalize=True,
-                collect_data_references=True,
+                cross_references=True,
                 detect_tail_calls=True)
         self.callgraph = self.cfg.kb.callgraph
         self._sim_procedures = {addr: (sp.library_name or "_UNKNOWN_LIB") + ":" + sp.display_name
