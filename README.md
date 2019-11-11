@@ -2,7 +2,7 @@
 
 LibMatch is a proof-of-concept tool for matching object files to binary executables.  The key idea here is *context* -- in firmware, many functions look very similar, which will confuse other tools like FLIRT.  Sometimes, the functions will be entirely identical, but we'll want to care what their name is for the purposes of re-hosting with High Level Emulation. Other benefits include using imports to indirectly name functions we don't have the code for, or whose code was changed due to compiler flags for version mismatches.
 
-This tool is meant to go with, and was developed along-side HALucinator(https://github.)
+This tool is meant to go with, and was developed along-side HALucinator(https://github.com/embedded-sec/halucinator) and hal-fuzz (https://github.com/ucsb-seclab/hal-fuzz)
 
 ## Installing
 
