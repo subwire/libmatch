@@ -177,9 +177,6 @@ def differing_constants(block_a, block_b):
         differences = compare_statement_dict(statement, statement_2)
         for d in differences:
             if d.type != DIFF_VALUE:
-                if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
-                    import ipdb;
-                    ipdb.set_trace()
                 raise UnmatchedStatementsException("Instruction has changed")
             else:
                 changes.append(ConstantChange(current_offset, d.value_a, d.value_b))
@@ -392,8 +389,6 @@ class FunctionDiff(object):
         :param check_constants: Whether or not to require matching constants in blocks.
         :returns:               Whether or not the blocks appear to be identical.
         """
-        if block_a.addr == 0x71d and self.function_b.name.startswith("EIC"):
-            import ipdb; ipdb.set_trace()
         # handle sim procedure blocks
         if self.lmd_a.is_hooked(block_a) and self.lmd_b.is_hooked(block_b):
             return self.lmd_a._sim_procedures[block_a] == self.lmd_b._sim_procedures[block_b]
@@ -415,9 +410,6 @@ class FunctionDiff(object):
         try:
             diff_constants = FunctionDiff._block_diff_constants(block_a, block_b)
         except UnmatchedStatementsException:
-            if block_a.addr == 0x08000bbd and block_b.addr == 0x4003dd:
-                import ipdb;
-                ipdb.set_trace()
             return False
 
         if not check_constants:
