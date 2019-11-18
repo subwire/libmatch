@@ -15,6 +15,7 @@ setup(
     install_requires=[
         'networkx>=2',
         'PyYAML',
-        'makeelf'
+        'makeelf',
+        'clint'
     ]
 )
