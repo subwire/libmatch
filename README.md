@@ -49,3 +49,28 @@ Curious how well it's doing? Debugging problems? Got an ELF with symbols? Try th
 
 This will produce nice colorful debug output with accuracy and collision information.
 
+## Example
+
+Some of these databases get rather big -- this is something we'd like to optimize, but for now, we include a few examples so you can see the process in action.
+
+Here's one, start-to-finish:
+
+```
+./utils/unblob -B ./objects/arm-none-eabi ./objects/arm-none-eabi.lmdb
+```
+
+.... wait some time....
+
+This will build an LMDB of the STM32 HAL, mbed, and some other assorted stuff.
+
+You can give it a try on our test binary.  This will run in scoring mode (used for metrics gathering).  It will first output "naive" results (without context), and ask you to hit Enter, followed by the final resutls.  We use an ELF here for ground-truth, but of course you can use this on the blob version of the same file too!
+
+```
+./utils/unblob -U --scoring -L ./objects/arm-none-eabi.lmdb -Y ./bins/Nucleo_i2c_master.elf ./bins/Nucleo_i2c_master_addrs.yml
+```
+
+## TODOs and future work
+
+* Re-work the exact matching to not require the full CFG, and lifted binary.  Perhaps use an LSH approach (EDG hypothesizes this won't work as well as the Ghidra authors claim)
+
+* Optimize LMDB storage format to use `shelf` or similar, to avoid massive memory usage.
