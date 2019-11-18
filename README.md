@@ -6,12 +6,28 @@ This tool is meant to go with, and was developed along-side HALucinator(https://
 
 ## Installing
 
-*Note: This is a proof-of-concept, it uses tons of RAM and isn't the world's most efficient tool.  It does get the job done, and we've used it on real firmware successfully, it just needs a little refactoring before I'd say it's ready for prime-time.*
+*EDG notes: This is a proof-of-concept, it uses tons of RAM and isn't the world's most efficient tool.  It does get the job done, and we've used it on real firmware successfully, it just needs a little refactoring before I'd say it's ready for prime-time.*
+
+### Shortcut: Now with Docker!
+
+If you're the kind of person that doens't hate Docker, you can try libmatch fast using this handy dockerfile!
+
+```
+docker build -t libmatch .
+```
+
+...and much later...
+
+```
+docker run -it libmatch /bin/bash
+```
+
+### Manual setup
 
 First, get angr(https://angr.horse/ )
 I suggest using the angr-dev package to do so (https://github.com/angr/angr-dev/ )
 
-You'll also probably want autoblob, a Loader that I wrote which helps with some binary blob loading (https://github.com/subwire/autoblob/ ) 
+You'll also need autoblob, a CLE Loader that I wrote which helps with some binary blob loading (https://github.com/subwire/autoblob/ ) 
 
 ## Usage
 
