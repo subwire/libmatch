@@ -1,15 +1,21 @@
-## -*- docker-image-name: "libmatch" -*-
-FROM angr/angr
-MAINTAINER edg@cs.ucsb.edu
-RUN apt-get update && apt-get install -y sudo automake virtualenvwrapper python3-pip python3-dev python-dev build-essential libxml2-dev \
-                      libxslt1-dev git libffi-dev cmake libreadline-dev libtool debootstrap debian-archive-keyring \
-                      libglib2.0-dev libpixman-1-dev screen binutils-multiarch nasm vim libssl-dev 
-USER angr
-RUN git clone https://github.com/subwire/autoblob /home/angr/angr-dev/autoblob
-RUN bash -c "source /usr/share/virtualenvwrapper/virtualenvwrapper.sh && workon angr && cd /home/angr/angr-dev/autoblob && pip install -e ."
-COPY --chown=angr . /home/angr/angr-dev/libmatch
-RUN bash -c "source /usr/share/virtualenvwrapper/virtualenvwrapper.sh && workon angr && cd /home/angr/angr-dev/libmatch && pip install -e ."
+FROM ubuntu:20.04
+WORKDIR /root
+ENV LC_CTYPE C.UTF-8
+ARG DEBIAN_FRONTEND=noninteractive
 
-WORKDIR /home/angr/angr-dev/libmatch
+RUN dpkg --add-architecture i386
 
+RUN apt update -y
+RUN apt install python3 python3-pip git vim build-essential unzip -y
+RUN ln -s /usr/bin/python3 /usr/bin/python
+RUN python3 -m pip install --upgrade pip
+RUN python3 -m pip install angr==9.0.4495
+RUN python3 -m pip install protobuf==3.20.0
+RUN python3 -m pip install six
 
+RUN git clone https://github.com/subwire/libmatch.git
+RUN python3 -m pip install ./libmatch/
+RUN git clone https://github.com/subwire/autoblob/
+RUN python3 -m pip install ./autoblob/
+
+WORKDIR /root
