@@ -150,6 +150,8 @@ class NormalizedFunction(object):
                 self.call_sites[n] = call_targets
 
     def __getattr__(self, a):
+        if a == "__getstate__" or a == "__setstate__": # to ensure correct pickling
+            raise AttributeError
         if "orig_function" in self.__dict__:
             return getattr(self.orig_function, a)
         else:

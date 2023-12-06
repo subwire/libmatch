@@ -1,6 +1,7 @@
 ## -*- docker-image-name: "libmatch" -*-
 FROM angr/angr
 MAINTAINER edg@cs.ucsb.edu
+USER root
 RUN apt-get update && apt-get install -y sudo automake virtualenvwrapper python3-pip python3-dev python-dev build-essential libxml2-dev \
                       libxslt1-dev git libffi-dev cmake libreadline-dev libtool debootstrap debian-archive-keyring \
                       libglib2.0-dev libpixman-1-dev screen binutils-multiarch nasm vim libssl-dev 
